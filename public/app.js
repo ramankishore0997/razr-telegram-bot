@@ -596,9 +596,14 @@ function renderCampaignsList() {
             <h5 class="font-bold text-sm text-white">${c.title}</h5>
             <span class="text-[11px] text-slate-400">${new Date(c.created_at).toLocaleString()}</span>
           </div>
-          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${c.status === 'completed' ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-700' : (isRunning ? 'bg-sky-900/40 text-sky-400 border border-sky-700 animate-pulse' : 'bg-slate-700 text-slate-300')}">
-            ${c.status}
-          </span>
+          <div class="flex items-center gap-2">
+            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${c.status === 'completed' ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-700' : (isRunning ? 'bg-sky-900/40 text-sky-400 border border-sky-700 animate-pulse' : 'bg-slate-700 text-slate-300')}">
+              ${c.status}
+            </span>
+            <button onclick="openCampaignReport(${c.id})" class="bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition">
+              <i data-lucide="bar-chart-2" class="w-3.5 h-3.5"></i> Details
+            </button>
+          </div>
         </div>
 
         <p class="text-xs text-slate-300 line-clamp-2 bg-dark-900/50 p-2.5 rounded-lg border border-slate-800/80 font-mono">${escapeHtml(c.text)}</p>
@@ -607,7 +612,7 @@ function renderCampaignsList() {
         <div class="space-y-1.5">
           <div class="flex justify-between text-[11px] text-slate-400">
             <span>Delivered: <b class="text-emerald-400">${c.total_sent}</b> / ${c.total_target}</span>
-            <span>Blocked: <b class="text-rose-400">${c.total_blocked}</b></span>
+            <span>Blocked: <b class="text-rose-400">${c.total_blocked}</b> | Failed: <b class="text-amber-400">${c.total_failed || 0}</b></span>
           </div>
           <div class="w-full bg-dark-900 rounded-full h-2 overflow-hidden border border-slate-800">
             <div class="bg-gradient-to-r from-sky-500 to-indigo-500 h-2 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
@@ -616,10 +621,90 @@ function renderCampaignsList() {
       </div>
     `;
   }).join('');
+
+  lucide.createIcons();
 }
 
 function updateCampaignProgressUI(data) {
   loadCampaignsList();
+}
+
+// Detailed Campaign Delivery Report Modal
+let activeReportRecipients = [];
+
+async function openCampaignReport(campaignId) {
+  document.getElementById('modalCampaignReport').classList.remove('hidden');
+  const tbody = document.getElementById('reportTableBody');
+  tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-400 text-xs">Loading delivery details...</td></tr>';
+
+  try {
+    const res = await fetch(`/api/campaigns/${campaignId}/details`);
+    const json = await res.json();
+    if (json.success) {
+      const { campaign, recipients } = json;
+      activeReportRecipients = recipients;
+
+      document.getElementById('reportModalTitle').innerText = campaign.title;
+      document.getElementById('reportModalDate').innerText = `Sent on ${new Date(campaign.created_at).toLocaleString()}`;
+      document.getElementById('reportModalStatus').innerText = campaign.status;
+
+      document.getElementById('reportMetricTarget').innerText = campaign.total_target || recipients.length;
+      document.getElementById('reportMetricSent').innerText = campaign.total_sent || 0;
+      document.getElementById('reportMetricBlocked').innerText = campaign.total_blocked || 0;
+      document.getElementById('reportMetricFailed').innerText = campaign.total_failed || 0;
+
+      renderReportTable(recipients);
+    }
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-rose-400 text-xs">Failed to load report.</td></tr>';
+  }
+}
+
+function closeCampaignReport() {
+  document.getElementById('modalCampaignReport').classList.add('hidden');
+}
+
+function renderReportTable(list) {
+  const tbody = document.getElementById('reportTableBody');
+  if (!list || list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-500 text-xs">No delivery records found for this campaign.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map(r => {
+    const isDelivered = r.status === 'delivered';
+    const isBlocked = r.status === 'blocked';
+    const time = r.delivered_at ? new Date(r.delivered_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
+
+    return `
+      <tr class="hover:bg-dark-800/50 transition">
+        <td class="p-3 font-medium text-white flex items-center gap-2">
+          <div class="w-6 h-6 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-[10px] font-bold text-white">
+            ${(r.first_name || 'U').charAt(0).toUpperCase()}
+          </div>
+          <span>${r.first_name || 'User'}</span>
+          <span class="text-slate-500 text-[11px]">${r.username ? '@' + r.username : ''}</span>
+        </td>
+        <td class="p-3 font-mono text-slate-400 text-[11px]">${r.telegram_id}</td>
+        <td class="p-3">
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${isDelivered ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800' : (isBlocked ? 'bg-rose-900/40 text-rose-400 border border-rose-800' : 'bg-amber-900/40 text-amber-400 border border-amber-800')}">
+            ${isDelivered ? '✅ Delivered' : (isBlocked ? '❌ Blocked' : '⚠️ Failed')}
+          </span>
+        </td>
+        <td class="p-3 text-slate-400 text-[11px]">${time}</td>
+        <td class="p-3 text-[11px] text-slate-400 truncate max-w-xs">${r.error_message || 'Successfully sent'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filterReportTable() {
+  const q = (document.getElementById('reportSearchInput').value || '').toLowerCase();
+  const filtered = activeReportRecipients.filter(r => {
+    const full = `${r.first_name} ${r.username} ${r.telegram_id} ${r.status}`.toLowerCase();
+    return full.includes(q);
+  });
+  renderReportTable(filtered);
 }
 
 // ==========================================

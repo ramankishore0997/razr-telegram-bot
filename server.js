@@ -287,9 +287,29 @@ app.get('/api/campaigns/:botId', async (req, res) => {
   try {
     const campaigns = await db.all(
       'SELECT * FROM campaigns WHERE bot_id = ? ORDER BY created_at DESC',
-      [req.params.botId]
+      [Number(req.params.botId)]
     );
     res.json({ success: true, data: campaigns });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Get detailed subscriber-by-subscriber delivery report for a campaign
+app.get('/api/campaigns/:campaignId/details', async (req, res) => {
+  try {
+    const campaignId = Number(req.params.campaignId);
+    const campaign = await db.get('SELECT * FROM campaigns WHERE id = ?', [campaignId]);
+    if (!campaign) {
+      return res.status(404).json({ success: false, error: 'Campaign not found' });
+    }
+
+    const recipients = await db.all(
+      'SELECT * FROM campaign_recipients WHERE campaign_id = ? ORDER BY delivered_at ASC',
+      [campaignId]
+    );
+
+    res.json({ success: true, campaign, recipients });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -308,7 +328,7 @@ app.post('/api/campaigns', async (req, res) => {
       `INSERT INTO campaigns (bot_id, title, text, photo_url, buttons, status)
        VALUES (?, ?, ?, ?, ?, 'pending')`,
       [
-        botId,
+        Number(botId),
         campaignTitle,
         text.trim(),
         photo_url || '',
@@ -316,13 +336,20 @@ app.post('/api/campaigns', async (req, res) => {
       ]
     );
 
+    let campaignId = insert.id;
+    if (!campaignId) {
+      const latest = await db.get('SELECT id FROM campaigns WHERE bot_id = ? ORDER BY id DESC LIMIT 1', [Number(botId)]);
+      campaignId = latest?.id;
+    }
+
     // Launch broadcast in background asynchronously
-    broadcastEngine.startBroadcast(insert.id).catch(err => {
+    broadcastEngine.startBroadcast(campaignId).catch(err => {
       console.error('Broadcast execution error:', err);
     });
 
-    res.json({ success: true, campaignId: insert.id, message: 'Broadcast queued and started successfully' });
+    res.json({ success: true, campaignId, message: 'Broadcast queued and started successfully' });
   } catch (err) {
+    console.error('Error creating campaign:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

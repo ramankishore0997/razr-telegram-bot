@@ -24,14 +24,23 @@ class BroadcastEngine {
   }
 
   async startBroadcast(campaignId) {
-    const campaign = await db.get('SELECT * FROM campaigns WHERE id = ?', [campaignId]);
+    const campaign = await db.get('SELECT * FROM campaigns WHERE id = ?', [Number(campaignId)]);
     if (!campaign) throw new Error('Campaign not found');
 
-    const botId = campaign.bot_id;
-    const bot = botManager.getBotInstance(botId);
-    if (!bot) throw new Error('Bot instance is not connected');
+    const botId = Number(campaign.bot_id);
+    let bot = botManager.getBotInstance(botId);
+    
+    // If bot instance not in memory, ensure it is started
+    if (!bot) {
+      const botRecord = await db.get('SELECT * FROM bots WHERE id = ?', [botId]);
+      if (botRecord) {
+        await botManager.startBot(botRecord.id, botRecord.token);
+        bot = botManager.getBotInstance(botId);
+      }
+    }
+    if (!bot) throw new Error('Bot instance is not connected. Please verify bot status.');
 
-    // Get all non-blocked subscribers
+    // Get all non-blocked subscribers for this bot
     const subscribers = await db.all('SELECT * FROM subscribers WHERE bot_id = ? AND is_blocked = 0', [botId]);
     
     await db.run(
@@ -91,18 +100,42 @@ class BroadcastEngine {
           await bot.telegram.sendMessage(chatId, text, extra);
         }
         sent++;
+
+        // Log successful delivery
+        await db.run(
+          `INSERT INTO campaign_recipients (campaign_id, subscriber_id, telegram_id, first_name, username, status)
+           VALUES (?, ?, ?, ?, ?, 'delivered')`,
+          [campaignId, sub.id, chatId, sub.first_name || '', sub.username || '']
+        );
+
+        // Save in messages history
+        await db.run(
+          `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type, media_url)
+           VALUES (?, ?, 'out', ?, ?, ?)`,
+          [botId, sub.id, text, campaign.photo_url ? 'photo' : 'text', campaign.photo_url || '']
+        );
       } catch (err) {
         if (err.response && (err.response.error_code === 403 || err.description?.includes('blocked') || err.description?.includes('deactivated'))) {
           blocked++;
           await db.run('UPDATE subscribers SET is_blocked = 1 WHERE id = ?', [sub.id]);
+          await db.run(
+            `INSERT INTO campaign_recipients (campaign_id, subscriber_id, telegram_id, first_name, username, status, error_message)
+             VALUES (?, ?, ?, ?, ?, 'blocked', 'User blocked the bot')`,
+            [campaignId, sub.id, chatId, sub.first_name || '', sub.username || '']
+          );
         } else {
           failed++;
           console.error(`Broadcast fail for user ${chatId}:`, err.message);
+          await db.run(
+            `INSERT INTO campaign_recipients (campaign_id, subscriber_id, telegram_id, first_name, username, status, error_message)
+             VALUES (?, ?, ?, ?, ?, 'failed', ?)`,
+            [campaignId, sub.id, chatId, sub.first_name || '', sub.username || '', err.message || 'Send error']
+          );
         }
       }
 
-      // Live progress broadcast every 5 messages or last message
-      if (i % 5 === 0 || i === subscribers.length - 1) {
+      // Live progress broadcast every 3 messages or last message
+      if (i % 3 === 0 || i === subscribers.length - 1) {
         const progress = Math.round(((i + 1) / subscribers.length) * 100);
         botManager.broadcastWs('campaign_update', {
           campaignId,
@@ -137,7 +170,7 @@ class BroadcastEngine {
       progress: 100
     });
 
-    console.log(`Campaign #${campaignId} completed. Sent: ${sent}, Blocked: ${blocked}, Failed: ${failed}`);
+    console.log(`Campaign #${campaignId} finished. Delivered: ${sent}, Blocked: ${blocked}, Failed: ${failed}`);
     return { sent, blocked, failed };
   }
 }

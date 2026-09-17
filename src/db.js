@@ -215,6 +215,19 @@ async function initDb() {
           completed_at TIMESTAMP
         )
       `);
+      await run(`
+        CREATE TABLE IF NOT EXISTS campaign_recipients (
+          id SERIAL PRIMARY KEY,
+          campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          subscriber_id INTEGER NOT NULL REFERENCES subscribers(id) ON DELETE CASCADE,
+          telegram_id TEXT NOT NULL,
+          first_name TEXT,
+          username TEXT,
+          status TEXT NOT NULL,
+          error_message TEXT DEFAULT '',
+          delivered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
       console.log('PostgreSQL database schema verified successfully.');
     } else {
       await run(`
@@ -284,6 +297,22 @@ async function initDb() {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           completed_at DATETIME,
           FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE CASCADE
+        )
+      `);
+
+      await run(`
+        CREATE TABLE IF NOT EXISTS campaign_recipients (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          campaign_id INTEGER NOT NULL,
+          subscriber_id INTEGER NOT NULL,
+          telegram_id TEXT NOT NULL,
+          first_name TEXT,
+          username TEXT,
+          status TEXT NOT NULL,
+          error_message TEXT DEFAULT '',
+          delivered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+          FOREIGN KEY(subscriber_id) REFERENCES subscribers(id) ON DELETE CASCADE
         )
       `);
       console.log('SQLite database initialized successfully.');
