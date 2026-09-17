@@ -21,7 +21,7 @@ class BroadcastEngine {
     const subscribers = await db.all('SELECT * FROM subscribers WHERE bot_id = ? AND is_blocked = 0', [botId]);
     
     await db.run(
-      'UPDATE campaigns SET status = "running", total_target = ? WHERE id = ?',
+      "UPDATE campaigns SET status = 'running', total_target = ? WHERE id = ?",
       [subscribers.length, campaignId]
     );
 
@@ -102,7 +102,7 @@ class BroadcastEngine {
 
     // Mark completed
     await db.run(
-      `UPDATE campaigns SET status = "completed", total_sent = ?, total_blocked = ?, total_failed = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      "UPDATE campaigns SET status = 'completed', total_sent = ?, total_blocked = ?, total_failed = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
       [sent, blocked, failed, campaignId]
     );
 

@@ -175,16 +175,16 @@ app.get('/api/messages/:botId/:subscriberId', async (req, res) => {
     
     // Mark incoming messages as read
     await db.run(
-      'UPDATE messages SET is_read = 1 WHERE bot_id = ? AND subscriber_id = ? AND direction = "in"',
-      [botId, subscriberId]
+      "UPDATE messages SET is_read = 1 WHERE bot_id = ? AND subscriber_id = ? AND direction = 'in'",
+      [Number(botId), Number(subscriberId)]
     );
 
     const messages = await db.all(
       'SELECT * FROM messages WHERE bot_id = ? AND subscriber_id = ? ORDER BY created_at ASC',
-      [botId, subscriberId]
+      [Number(botId), Number(subscriberId)]
     );
 
-    const subscriber = await db.get('SELECT * FROM subscribers WHERE id = ?', [subscriberId]);
+    const subscriber = await db.get('SELECT * FROM subscribers WHERE id = ?', [Number(subscriberId)]);
     res.json({ success: true, subscriber, data: messages });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

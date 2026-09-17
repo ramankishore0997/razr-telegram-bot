@@ -69,13 +69,15 @@ class BotManager {
       let sub = await db.get('SELECT * FROM subscribers WHERE bot_id = ? AND telegram_id = ?', [botId, telegramId]);
       
       if (!sub) {
-        const result = await db.run(
+        await db.run(
           `INSERT INTO subscribers (bot_id, telegram_id, first_name, last_name, username, last_interaction)
            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
           [botId, telegramId, from.first_name || '', from.last_name || '', from.username || '']
         );
-        sub = await db.get('SELECT * FROM subscribers WHERE id = ?', [result.id]);
-        this.broadcastWs('new_subscriber', { botId, subscriber: sub });
+        sub = await db.get('SELECT * FROM subscribers WHERE bot_id = ? AND telegram_id = ?', [botId, telegramId]);
+        if (sub) {
+          this.broadcastWs('new_subscriber', { botId, subscriber: sub });
+        }
       } else {
         await db.run(
           `UPDATE subscribers SET first_name = ?, last_name = ?, username = ?, is_blocked = 0, last_interaction = CURRENT_TIMESTAMP WHERE id = ?`,
@@ -89,15 +91,26 @@ class BotManager {
     bot.command('start', async (ctx) => {
       try {
         const sub = await getOrCreateSubscriber(ctx.from);
+        if (!sub) return;
         
         // Save incoming /start message
-        const msgRes = await db.run(
+        await db.run(
           `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type)
            VALUES (?, ?, 'in', '/start', 'text')`,
           [botId, sub.id]
         );
-        const incomingMsg = await db.get('SELECT * FROM messages WHERE id = ?', [msgRes.id]);
-        this.broadcastWs('new_message', { botId, subscriberId: sub.id, message: incomingMsg });
+        this.broadcastWs('new_message', {
+          botId,
+          subscriberId: sub.id,
+          message: {
+            bot_id: botId,
+            subscriber_id: sub.id,
+            direction: 'in',
+            text: '/start',
+            media_type: 'text',
+            created_at: new Date().toISOString()
+          }
+        });
 
         // Retrieve latest bot welcome config
         const currentBot = await db.get('SELECT * FROM bots WHERE id = ?', [botId]);
