@@ -186,8 +186,16 @@
               </div>
               <div class="min-w-0 truncate">
                 <h3 id="chatUserName" class="text-sm font-semibold text-white truncate">Select a conversation</h3>
-                <span id="chatUserMeta" class="text-[11px] text-slate-400 block truncate">Telegram ID: -</span>
+                <div id="chatUserMeta" class="text-[11px] text-slate-400 block truncate">Telegram ID: -</div>
               </div>
+            </div>
+
+            <!-- Block / Unblock Action Button in Header -->
+            <div id="chatHeaderActions" class="hidden flex items-center gap-2 shrink-0">
+              <button id="btnToggleBlock" onclick="toggleBlockActiveUser()" class="px-2.5 py-1 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition bg-dark-900 border-slate-700 text-slate-300 hover:text-white">
+                <i data-lucide="shield-ban" class="w-3.5 h-3.5"></i>
+                <span id="btnToggleBlockText">Block User</span>
+              </button>
             </div>
           </div>
 
@@ -201,6 +209,12 @@
 
           <!-- Chat Input Box -->
           <div class="p-3 sm:p-4 border-t border-slate-800 bg-dark-800/30 shrink-0">
+            <!-- Blocked Banner -->
+            <div id="blockedUserBanner" class="hidden p-2.5 mb-2 bg-rose-950/60 border border-rose-800/80 rounded-xl text-center text-xs text-rose-300 font-medium flex items-center justify-center gap-2">
+              <i data-lucide="shield-alert" class="w-4 h-4 text-rose-400 shrink-0"></i>
+              <span>This user is blocked. They cannot message the bot and broadcasts are not sent to them.</span>
+            </div>
+
             <form id="chatForm" onsubmit="handleSendMessage(event)" class="flex items-end gap-2">
               <div class="flex-1 bg-dark-900 border border-slate-700 rounded-xl p-2 focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500 transition">
                 <textarea id="chatInputText" rows="2" placeholder="Type reply... (Enter to send)" class="w-full bg-transparent border-0 focus:outline-none text-sm text-slate-200 resize-none px-1"></textarea>

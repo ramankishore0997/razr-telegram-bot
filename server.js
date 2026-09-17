@@ -307,6 +307,32 @@ app.post('/api/subscribers/import', async (req, res) => {
   }
 });
 
+// Toggle block/unblock a subscriber
+app.post('/api/subscribers/:id/toggle-block', async (req, res) => {
+  try {
+    const subscriberId = Number(req.params.id);
+    const sub = await db.get('SELECT * FROM subscribers WHERE id = ?', [subscriberId]);
+    if (!sub) return res.status(404).json({ success: false, error: 'Subscriber not found' });
+
+    const newBlockedState = sub.is_blocked ? 0 : 1;
+    await db.run('UPDATE subscribers SET is_blocked = ? WHERE id = ?', [newBlockedState, subscriberId]);
+
+    botManager.broadcastWs('subscriber_updated', {
+      botId: sub.bot_id,
+      subscriberId: sub.id,
+      is_blocked: newBlockedState
+    });
+
+    res.json({
+      success: true,
+      is_blocked: newBlockedState,
+      message: newBlockedState ? 'User has been blocked' : 'User has been unblocked'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ==========================================
 // BROADCAST & CAMPAIGNS API
 // ==========================================

@@ -611,11 +611,87 @@ async function selectConversation(subscriberId) {
       `;
       document.getElementById('chatUserAvatar').innerText = (activeSubscriber.first_name || 'U').charAt(0).toUpperCase();
 
+      // Update Block / Unblock Button in Header
+      const headerActions = document.getElementById('chatHeaderActions');
+      const btnToggleBlock = document.getElementById('btnToggleBlock');
+      const btnToggleBlockText = document.getElementById('btnToggleBlockText');
+      const blockedBanner = document.getElementById('blockedUserBanner');
+      const chatInputText = document.getElementById('chatInputText');
+      const btnSendReply = document.getElementById('btnSendReply');
+
+      if (headerActions) headerActions.classList.remove('hidden');
+
+      if (activeSubscriber.is_blocked) {
+        btnToggleBlockText.innerText = 'Unblock User';
+        btnToggleBlock.className = 'px-2.5 py-1 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition bg-rose-900/40 text-rose-300 border-rose-700 hover:bg-rose-900/70';
+        if (blockedBanner) blockedBanner.classList.remove('hidden');
+        if (chatInputText) {
+          chatInputText.disabled = true;
+          chatInputText.placeholder = 'User is blocked. Unblock them to reply...';
+        }
+        if (btnSendReply) btnSendReply.disabled = true;
+      } else {
+        btnToggleBlockText.innerText = 'Block User';
+        btnToggleBlock.className = 'px-2.5 py-1 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition bg-dark-900 border-slate-700 text-slate-300 hover:text-rose-400 hover:border-rose-700';
+        if (blockedBanner) blockedBanner.classList.add('hidden');
+        if (chatInputText) {
+          chatInputText.disabled = false;
+          chatInputText.placeholder = 'Type reply... (Enter to send)';
+        }
+        if (btnSendReply) btnSendReply.disabled = false;
+      }
+
       // Render Messages
       renderMessagesFeed(json.data);
+      lucide.createIcons();
     }
   } catch (e) {
     feed.innerHTML = '<div class="h-full flex items-center justify-center text-rose-400 text-xs">Failed to load chat history.</div>';
+  }
+}
+
+// Toggle block active chatting user
+async function toggleBlockActiveUser() {
+  if (!activeSubscriberId) return;
+  const isCurrentlyBlocked = activeSubscriber && activeSubscriber.is_blocked;
+  const actionName = isCurrentlyBlocked ? 'unblock' : 'block';
+
+  if (!confirm(`Are you sure you want to ${actionName} this user? ${isCurrentlyBlocked ? 'They will be able to message the bot again.' : 'They will NOT be able to message the bot, and will be excluded from all broadcasts.'}`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/subscribers/${activeSubscriberId}/toggle-block`, { method: 'POST' });
+    const json = await res.json();
+    if (json.success) {
+      await loadConversations();
+      await selectConversation(activeSubscriberId);
+      if (currentTab === 'subscribers') await loadSubscribers();
+    } else {
+      alert('Failed: ' + json.error);
+    }
+  } catch (err) {
+    alert('Error updating user block status');
+  }
+}
+
+// Toggle block from subscribers table
+async function toggleBlockSubscriber(subId, event) {
+  if (event) event.stopPropagation();
+  try {
+    const res = await fetch(`/api/subscribers/${subId}/toggle-block`, { method: 'POST' });
+    const json = await res.json();
+    if (json.success) {
+      await loadSubscribers();
+      if (activeSubscriberId === subId) {
+        await selectConversation(subId);
+      }
+      loadConversations();
+    } else {
+      alert('Failed: ' + json.error);
+    }
+  } catch (err) {
+    alert('Error updating user block status');
   }
 }
 
@@ -1350,9 +1426,14 @@ function renderSubscribersTable(list) {
           </span>
         </td>
         <td class="p-3.5 text-right">
-          <button onclick="selectConversation(${s.id}); switchTab('inbox');" class="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 px-3 py-1 rounded-lg text-[11px] font-medium transition">
-            Chat
-          </button>
+          <div class="inline-flex items-center gap-2">
+            <button onclick="toggleBlockSubscriber(${s.id}, event)" class="px-2.5 py-1 rounded-lg text-[11px] font-medium border transition ${s.is_blocked ? 'bg-rose-900/30 text-rose-300 border-rose-700 hover:bg-rose-900/60' : 'bg-dark-800 text-slate-400 border-slate-700 hover:text-rose-400 hover:border-rose-700'}">
+              ${s.is_blocked ? 'Unblock' : 'Block'}
+            </button>
+            <button onclick="selectConversation(${s.id}); switchTab('inbox');" class="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 px-3 py-1 rounded-lg text-[11px] font-medium transition">
+              Chat
+            </button>
+          </div>
         </td>
       </tr>
     `;

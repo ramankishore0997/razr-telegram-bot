@@ -191,7 +191,7 @@ class BotManager {
         }
       } else {
         await db.run(
-          `UPDATE subscribers SET first_name = ?, last_name = ?, username = ?, is_blocked = 0, last_interaction = CURRENT_TIMESTAMP WHERE id = ?`,
+          `UPDATE subscribers SET first_name = ?, last_name = ?, username = ?, last_interaction = CURRENT_TIMESTAMP WHERE id = ?`,
           [from.first_name || '', from.last_name || '', from.username || '', sub.id]
         );
       }
@@ -203,6 +203,13 @@ class BotManager {
       try {
         const from = ctx.from;
         const sub = await getOrCreateSubscriber(from);
+        
+        // If user is blocked by admin, completely ignore them (no response, no flow, no alert)
+        if (sub && sub.is_blocked) {
+          console.log(`[Blocked User] @${from?.username || from?.id} attempted /start - ignored.`);
+          return;
+        }
+
         const subId = sub ? sub.id : null;
 
         // Save incoming /start message
@@ -366,6 +373,12 @@ class BotManager {
         const sub = await getOrCreateSubscriber(ctx.from);
         if (!sub) return;
 
+        // If user is blocked by admin, completely ignore them (no incoming logging, no admin alert)
+        if (sub.is_blocked) {
+          console.log(`[Blocked User] @${ctx.from.username || ctx.from.id} message ignored.`);
+          return;
+        }
+
         let text = rawText;
         let mediaType = 'text';
         let mediaUrl = '';
@@ -443,12 +456,12 @@ class BotManager {
 
   // Stop a bot instance
   async stopBot(botId) {
-    if (this.activeBots.has(botId)) {
-      const { instance } = this.activeBots.get(botId);
+    if (this.activeBots.has(Number(botId))) {
+      const { instance } = this.activeBots.get(Number(botId));
       try {
         instance.stop();
       } catch (e) {}
-      this.activeBots.delete(botId);
+      this.activeBots.delete(Number(botId));
       console.log(`Stopped bot ID ${botId}`);
     }
   }
@@ -458,8 +471,9 @@ class BotManager {
     const active = this.activeBots.get(Number(botId));
     if (!active) throw new Error('Bot is not active or connected');
 
-    const sub = await db.get('SELECT * FROM subscribers WHERE id = ? AND bot_id = ?', [subscriberId, botId]);
+    const sub = await db.get('SELECT * FROM subscribers WHERE id = ? AND bot_id = ?', [Number(subscriberId), Number(botId)]);
     if (!sub) throw new Error('Subscriber not found');
+    if (sub.is_blocked) throw new Error('This user is blocked by admin. Unblock them first to send messages.');
 
     const bot = active.instance;
     const chatId = sub.telegram_id;
