@@ -5,14 +5,102 @@ const db = require('./db');
 
 function getMediaSource(mediaUrl) {
   if (!mediaUrl) return null;
-  const clean = mediaUrl.trim();
+  const clean = String(mediaUrl).trim();
+  if (!clean) return null;
   if (clean.startsWith('/uploads/') || clean.startsWith('uploads/')) {
     const localPath = path.join(__dirname, '../public', clean.replace(/^\//, ''));
     if (fs.existsSync(localPath)) {
       return { source: localPath };
     }
+    // File not found on disk, return null so Telegraf doesn't crash with invalid URL
+    return null;
   }
-  return clean;
+  if (clean.startsWith('http://') || clean.startsWith('https://')) {
+    return clean;
+  }
+  return null;
+}
+
+// Build inline keyboard with URL validation
+function buildKeyboard(btnList) {
+  if (!Array.isArray(btnList) || btnList.length === 0) return null;
+  const valid = btnList.filter(b => b && b.text && String(b.text).trim());
+  if (valid.length === 0) return null;
+  const rows = valid.map(btn => {
+    const text = String(btn.text).trim();
+    let url = String(btn.url || '').trim();
+    if (url) {
+      if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('tg://')) {
+        url = `https://${url}`;
+      }
+      return [Markup.button.url(text, url)];
+    }
+    return [Markup.button.callback(text, btn.callback_data || text)];
+  });
+  return Markup.inlineKeyboard(rows);
+}
+
+// Safely send a welcome sequence step (handles HTML errors & missing media gracefully)
+async function sendSafeStep(ctx, step, formatText) {
+  const rawText = step.text || '';
+  const text = formatText(rawText);
+  const keyboard = buildKeyboard(step.buttons);
+  const type = (step.type || 'text').toLowerCase();
+  const mediaUrl = String(step.media_url || '').trim();
+  const mediaSource = getMediaSource(mediaUrl);
+
+  let sentType = 'text';
+  let sentMedia = '';
+
+  const extraHtml = keyboard ? { parse_mode: 'HTML', ...keyboard } : { parse_mode: 'HTML' };
+  const extraPlain = keyboard ? { ...keyboard } : {};
+
+  // 1. Photo Step
+  if (type === 'photo' && mediaSource) {
+    sentType = 'photo';
+    sentMedia = mediaUrl;
+    try {
+      await ctx.replyWithPhoto(mediaSource, { ...extraHtml, caption: text });
+      return { sentType, sentMedia, text };
+    } catch (err) {
+      console.warn('Photo with HTML failed, retrying plain caption:', err.message);
+      try {
+        await ctx.replyWithPhoto(mediaSource, { ...extraPlain, caption: text });
+        return { sentType, sentMedia, text };
+      } catch (photoErr) {
+        console.warn('Photo file send failed, falling back to text message:', photoErr.message);
+      }
+    }
+  }
+
+  // 2. Document / PDF Step
+  if ((type === 'document' || type === 'pdf') && mediaSource) {
+    sentType = 'document';
+    sentMedia = mediaUrl;
+    try {
+      await ctx.replyWithDocument(mediaSource, { ...extraHtml, caption: text });
+      return { sentType, sentMedia, text };
+    } catch (err) {
+      console.warn('Document with HTML failed, retrying plain caption:', err.message);
+      try {
+        await ctx.replyWithDocument(mediaSource, { ...extraPlain, caption: text });
+        return { sentType, sentMedia, text };
+      } catch (docErr) {
+        console.warn('Document send failed, falling back to text message:', docErr.message);
+      }
+    }
+  }
+
+  // 3. Text Step (or fallback if media failed)
+  sentType = 'text';
+  const safeText = text && text.trim() ? text.trim() : '👋 Welcome!';
+  try {
+    await ctx.reply(safeText, extraHtml);
+  } catch (htmlErr) {
+    console.warn('HTML message reply failed, retrying plain text:', htmlErr.message);
+    await ctx.reply(safeText, extraPlain);
+  }
+  return { sentType, sentMedia, text: safeText };
 }
 
 class BotManager {
@@ -63,11 +151,11 @@ class BotManager {
 
   // Start a single bot instance
   async startBot(botId, token) {
-    if (this.activeBots.has(botId)) {
-      await this.stopBot(botId);
+    if (this.activeBots.has(Number(botId))) {
+      await this.stopBot(Number(botId));
     }
 
-    const botRecord = await db.get('SELECT * FROM bots WHERE id = ?', [botId]);
+    const botRecord = await db.get('SELECT * FROM bots WHERE id = ?', [Number(botId)]);
     if (!botRecord) throw new Error('Bot not found in database');
 
     const bot = new Telegraf(token);
@@ -79,18 +167,19 @@ class BotManager {
 
     // Helper to get or create subscriber
     const getOrCreateSubscriber = async (from) => {
+      if (!from || !from.id) return null;
       const telegramId = String(from.id);
-      let sub = await db.get('SELECT * FROM subscribers WHERE bot_id = ? AND telegram_id = ?', [botId, telegramId]);
+      let sub = await db.get('SELECT * FROM subscribers WHERE bot_id = ? AND telegram_id = ?', [Number(botId), telegramId]);
       
       if (!sub) {
         await db.run(
           `INSERT INTO subscribers (bot_id, telegram_id, first_name, last_name, username, last_interaction)
            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [botId, telegramId, from.first_name || '', from.last_name || '', from.username || '']
+          [Number(botId), telegramId, from.first_name || '', from.last_name || '', from.username || '']
         );
-        sub = await db.get('SELECT * FROM subscribers WHERE bot_id = ? AND telegram_id = ?', [botId, telegramId]);
+        sub = await db.get('SELECT * FROM subscribers WHERE bot_id = ? AND telegram_id = ?', [Number(botId), telegramId]);
         if (sub) {
-          this.broadcastWs('new_subscriber', { botId, subscriber: sub });
+          this.broadcastWs('new_subscriber', { botId: Number(botId), subscriber: sub });
         }
       } else {
         await db.run(
@@ -101,33 +190,36 @@ class BotManager {
       return sub;
     };
 
-    // Handle /start command & Welcome flow
-    bot.command('start', async (ctx) => {
+    // Shared execution function for /start welcome flow (runs EVERY time user sends /start)
+    const handleStartTrigger = async (ctx) => {
       try {
-        const sub = await getOrCreateSubscriber(ctx.from);
-        if (!sub) return;
-        
+        const from = ctx.from;
+        const sub = await getOrCreateSubscriber(from);
+        const subId = sub ? sub.id : null;
+
         // Save incoming /start message
-        await db.run(
-          `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type)
-           VALUES (?, ?, 'in', '/start', 'text')`,
-          [botId, sub.id]
-        );
-        this.broadcastWs('new_message', {
-          botId,
-          subscriberId: sub.id,
-          message: {
-            bot_id: botId,
-            subscriber_id: sub.id,
-            direction: 'in',
-            text: '/start',
-            media_type: 'text',
-            created_at: new Date().toISOString()
-          }
-        });
+        if (subId) {
+          await db.run(
+            `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type)
+             VALUES (?, ?, 'in', '/start', 'text')`,
+            [Number(botId), subId]
+          );
+          this.broadcastWs('new_message', {
+            botId: Number(botId),
+            subscriberId: subId,
+            message: {
+              bot_id: Number(botId),
+              subscriber_id: subId,
+              direction: 'in',
+              text: '/start',
+              media_type: 'text',
+              created_at: new Date().toISOString()
+            }
+          });
+        }
 
         // Retrieve latest bot welcome config
-        const currentBot = await db.get('SELECT * FROM bots WHERE id = ?', [botId]);
+        const currentBot = await db.get('SELECT * FROM bots WHERE id = ?', [Number(botId)]);
         if (!currentBot) return;
 
         let flow = [];
@@ -140,122 +232,100 @@ class BotManager {
         // Helper to format placeholders
         const formatText = (raw) => {
           if (!raw) return '';
-          return raw
-            .replace(/{first_name}/g, ctx.from.first_name || 'Friend')
-            .replace(/{last_name}/g, ctx.from.last_name || '')
-            .replace(/{username}/g, ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || 'Friend'));
-        };
-
-        // Helper to build keyboard
-        const buildKeyboard = (btnList) => {
-          if (!Array.isArray(btnList) || btnList.length === 0) return null;
-          const valid = btnList.filter(b => b && b.text && b.text.trim());
-          if (valid.length === 0) return null;
-          const rows = valid.map(btn => {
-            if (btn.url && btn.url.trim()) {
-              return [Markup.button.url(btn.text.trim(), btn.url.trim())];
-            }
-            return [Markup.button.callback(btn.text.trim(), btn.callback_data || btn.text.trim())];
-          });
-          return Markup.inlineKeyboard(rows);
+          return String(raw)
+            .replace(/{first_name}/g, from?.first_name || 'Friend')
+            .replace(/{last_name}/g, from?.last_name || '')
+            .replace(/{username}/g, from?.username ? `@${from.username}` : (from?.first_name || 'Friend'));
         };
 
         if (Array.isArray(flow) && flow.length > 0) {
-          // Process multi-step sequence
+          // Process sequential flow steps
           for (let i = 0; i < flow.length; i++) {
-            const step = flow[i];
-            const stepText = formatText(step.text || '');
-            const keyboard = buildKeyboard(step.buttons);
-            const extra = keyboard ? { parse_mode: 'HTML', ...keyboard } : { parse_mode: 'HTML' };
-            const type = (step.type || 'text').toLowerCase();
-            const mediaUrl = (step.media_url || '').trim();
+            const stepResult = await sendSafeStep(ctx, flow[i], formatText);
 
-            let sentType = 'text';
-            let sentMedia = '';
-
-            try {
-              const mediaSource = getMediaSource(mediaUrl);
-              if (type === 'photo' && mediaSource) {
-                sentType = 'photo';
-                sentMedia = mediaUrl;
-                await ctx.replyWithPhoto(mediaSource, { ...extra, caption: stepText });
-              } else if ((type === 'document' || type === 'pdf') && mediaSource) {
-                sentType = 'document';
-                sentMedia = mediaUrl;
-                await ctx.replyWithDocument(mediaSource, { ...extra, caption: stepText });
-              } else {
-                sentType = 'text';
-                if (stepText) {
-                  await ctx.reply(stepText, extra);
-                }
-              }
-
-              // Save outgoing message
+            if (subId && stepResult) {
               await db.run(
                 `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type, media_url)
                  VALUES (?, ?, 'out', ?, ?, ?)`,
-                [botId, sub.id, stepText, sentType, sentMedia]
+                [Number(botId), subId, stepResult.text || '', stepResult.sentType || 'text', stepResult.sentMedia || '']
               );
               this.broadcastWs('new_message', {
-                botId,
-                subscriberId: sub.id,
+                botId: Number(botId),
+                subscriberId: subId,
                 message: {
-                  bot_id: botId,
-                  subscriber_id: sub.id,
+                  bot_id: Number(botId),
+                  subscriber_id: subId,
                   direction: 'out',
-                  text: stepText,
-                  media_type: sentType,
-                  media_url: sentMedia,
+                  text: stepResult.text || '',
+                  media_type: stepResult.sentType || 'text',
+                  media_url: stepResult.sentMedia || '',
                   created_at: new Date().toISOString()
                 }
               });
+            }
 
-              // Small delay between sequential messages
-              if (i < flow.length - 1) {
-                await new Promise(r => setTimeout(r, 450));
-              }
-            } catch (stepErr) {
-              console.error(`Error sending welcome step #${i + 1}:`, stepErr.message);
+            // Delay between multiple sequential messages
+            if (i < flow.length - 1) {
+              await new Promise(r => setTimeout(r, 450));
             }
           }
         } else {
           // Legacy single welcome message fallback
-          let welcomeText = formatText(currentBot.welcome_message || 'Hello {first_name}! Welcome to our bot 🎉');
-          let keyboard = null;
+          let buttons = [];
           try {
-            const buttons = JSON.parse(currentBot.welcome_buttons || '[]');
-            keyboard = buildKeyboard(buttons);
+            buttons = JSON.parse(currentBot.welcome_buttons || '[]');
           } catch (e) {}
 
-          const extra = keyboard ? { parse_mode: 'HTML', ...keyboard } : { parse_mode: 'HTML' };
-          let sentType = 'text';
-          let sentMedia = currentBot.welcome_photo || '';
+          const singleStep = {
+            text: currentBot.welcome_message || 'Hello {first_name}! Welcome to our bot 🎉',
+            type: currentBot.welcome_photo ? 'photo' : 'text',
+            media_url: currentBot.welcome_photo || '',
+            buttons: buttons
+          };
 
-          if (sentMedia && sentMedia.trim().length > 0) {
-            sentType = 'photo';
-            await ctx.replyWithPhoto(sentMedia.trim(), { ...extra, caption: welcomeText });
-          } else {
-            await ctx.reply(welcomeText, extra);
+          const stepResult = await sendSafeStep(ctx, singleStep, formatText);
+
+          if (subId && stepResult) {
+            await db.run(
+              `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type, media_url)
+               VALUES (?, ?, 'out', ?, ?, ?)`,
+              [Number(botId), subId, stepResult.text || '', stepResult.sentType || 'text', stepResult.sentMedia || '']
+            );
+            this.broadcastWs('new_message', {
+              botId: Number(botId),
+              subscriberId: subId,
+              message: {
+                bot_id: Number(botId),
+                subscriber_id: subId,
+                direction: 'out',
+                text: stepResult.text || '',
+                media_type: stepResult.sentType || 'text',
+                media_url: stepResult.sentMedia || '',
+                created_at: new Date().toISOString()
+              }
+            });
           }
-
-          await db.run(
-            `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type, media_url)
-             VALUES (?, ?, 'out', ?, ?, ?)`,
-            [botId, sub.id, welcomeText, sentType, sentMedia]
-          );
         }
       } catch (err) {
-        console.error('Error handling /start:', err);
+        console.error(`Error handling /start for bot ID ${botId}:`, err);
       }
-    });
+    };
 
-    // Handle regular text and media messages from users
+    // Register /start triggers
+    bot.command('start', handleStartTrigger);
+    bot.hears(/^\/start/i, handleStartTrigger);
+
+    // Handle regular incoming text and media messages from users
     bot.on('message', async (ctx) => {
       try {
-        if (ctx.message.text && ctx.message.text.startsWith('/start')) return;
+        const rawText = ctx.message.text || ctx.message.caption || '';
+        // If it was already handled by /start, ignore here
+        if (rawText.toLowerCase().startsWith('/start')) return;
 
         const sub = await getOrCreateSubscriber(ctx.from);
-        let text = ctx.message.text || ctx.message.caption || '';
+        if (!sub) return;
+
+        let text = rawText;
         let mediaType = 'text';
         let mediaUrl = '';
 
@@ -289,10 +359,10 @@ class BotManager {
         const msgRes = await db.run(
           `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type, media_url)
            VALUES (?, ?, 'in', ?, ?, ?)`,
-          [botId, sub.id, text, mediaType, mediaUrl]
+          [Number(botId), sub.id, text, mediaType, mediaUrl]
         );
         const incomingMsg = await db.get('SELECT * FROM messages WHERE id = ?', [msgRes.id]);
-        this.broadcastWs('new_message', { botId, subscriberId: sub.id, message: incomingMsg });
+        this.broadcastWs('new_message', { botId: Number(botId), subscriberId: sub.id, message: incomingMsg });
       } catch (err) {
         console.error('Error handling incoming message:', err);
       }
@@ -304,7 +374,7 @@ class BotManager {
     });
 
     const botInfo = await bot.telegram.getMe();
-    this.activeBots.set(botId, { instance: bot, info: botInfo });
+    this.activeBots.set(Number(botId), { instance: bot, info: botInfo });
     console.log(`Bot connected: @${botInfo.username} (ID: ${botId})`);
     return botInfo;
   }

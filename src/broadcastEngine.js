@@ -8,14 +8,19 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function getMediaSource(mediaUrl) {
   if (!mediaUrl) return null;
-  const clean = mediaUrl.trim();
+  const clean = String(mediaUrl).trim();
+  if (!clean) return null;
   if (clean.startsWith('/uploads/') || clean.startsWith('uploads/')) {
     const localPath = path.join(__dirname, '../public', clean.replace(/^\//, ''));
     if (fs.existsSync(localPath)) {
       return { source: localPath };
     }
+    return null;
   }
-  return clean;
+  if (clean.startsWith('http://') || clean.startsWith('https://')) {
+    return clean;
+  }
+  return null;
 }
 
 class BroadcastEngine {
@@ -63,18 +68,30 @@ class BroadcastEngine {
     let blocked = 0;
     let failed = 0;
 
-    // Parse buttons if any
-    let extra = { parse_mode: 'HTML' };
+    // Parse buttons if any with URL validation
+    let keyboardMarkup = null;
     try {
       const buttons = JSON.parse(campaign.buttons || '[]');
       if (Array.isArray(buttons) && buttons.length > 0) {
-        const inlineRows = buttons.map(btn => {
-          if (btn.url) return [Markup.button.url(btn.text, btn.url)];
-          return [Markup.button.callback(btn.text, btn.callback_data || btn.text)];
+        const inlineRows = buttons.filter(b => b && b.text).map(btn => {
+          const text = String(btn.text).trim();
+          let url = String(btn.url || '').trim();
+          if (url) {
+            if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('tg://')) {
+              url = `https://${url}`;
+            }
+            return [Markup.button.url(text, url)];
+          }
+          return [Markup.button.callback(text, btn.callback_data || text)];
         });
-        extra.reply_markup = Markup.inlineKeyboard(inlineRows).reply_markup;
+        if (inlineRows.length > 0) {
+          keyboardMarkup = Markup.inlineKeyboard(inlineRows).reply_markup;
+        }
       }
     } catch (e) {}
+
+    const extraHtml = keyboardMarkup ? { parse_mode: 'HTML', reply_markup: keyboardMarkup } : { parse_mode: 'HTML' };
+    const extraPlain = keyboardMarkup ? { reply_markup: keyboardMarkup } : {};
 
     // Process broadcast queue with safe throttling (40ms per msg => ~25 msg/sec)
     for (let i = 0; i < subscribers.length; i++) {
@@ -82,22 +99,38 @@ class BroadcastEngine {
       const chatId = sub.telegram_id;
 
       // Personalize message
-      let text = campaign.text
+      let text = (campaign.text || '')
         .replace(/{first_name}/g, sub.first_name || 'Friend')
         .replace(/{last_name}/g, sub.last_name || '')
         .replace(/{username}/g, sub.username ? `@${sub.username}` : (sub.first_name || 'Friend'));
 
+      if (!text.trim()) text = '📢 Special Announcement';
+
       try {
         const mediaSource = getMediaSource(campaign.photo_url);
         if (mediaSource) {
-          const isDoc = campaign.photo_url.toLowerCase().endsWith('.pdf') || campaign.photo_url.toLowerCase().endsWith('.doc') || campaign.photo_url.toLowerCase().endsWith('.docx');
+          const isDoc = String(campaign.photo_url).toLowerCase().endsWith('.pdf') || 
+                        String(campaign.photo_url).toLowerCase().endsWith('.doc') || 
+                        String(campaign.photo_url).toLowerCase().endsWith('.docx');
           if (isDoc) {
-            await bot.telegram.sendDocument(chatId, mediaSource, { ...extra, caption: text });
+            try {
+              await bot.telegram.sendDocument(chatId, mediaSource, { ...extraHtml, caption: text });
+            } catch (err) {
+              await bot.telegram.sendDocument(chatId, mediaSource, { ...extraPlain, caption: text });
+            }
           } else {
-            await bot.telegram.sendPhoto(chatId, mediaSource, { ...extra, caption: text });
+            try {
+              await bot.telegram.sendPhoto(chatId, mediaSource, { ...extraHtml, caption: text });
+            } catch (err) {
+              await bot.telegram.sendPhoto(chatId, mediaSource, { ...extraPlain, caption: text });
+            }
           }
         } else {
-          await bot.telegram.sendMessage(chatId, text, extra);
+          try {
+            await bot.telegram.sendMessage(chatId, text, extraHtml);
+          } catch (err) {
+            await bot.telegram.sendMessage(chatId, text, extraPlain);
+          }
         }
         sent++;
 
