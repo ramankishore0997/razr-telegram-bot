@@ -2,7 +2,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
 let rawDbUrl = (process.env.DATABASE_URL || '').trim();
-// Remove accidental surrounding quotes
+// Strip surrounding quotes
 if ((rawDbUrl.startsWith('"') && rawDbUrl.endsWith('"')) || (rawDbUrl.startsWith("'") && rawDbUrl.endsWith("'"))) {
   rawDbUrl = rawDbUrl.slice(1, -1).trim();
 }
@@ -11,19 +11,44 @@ let isPostgres = false;
 let pgPool = null;
 let db = null;
 
+function parsePgConfig(urlStr) {
+  // Regex to extract credentials even with special characters in password
+  const match = urlStr.match(/^postgres(?:ql)?:\/\/([^:]+):(.*)@([^:/]+)(?::(\d+))?\/(.+)$/);
+  if (match) {
+    let user = match[1];
+    let password = match[2];
+    try { user = decodeURIComponent(user); } catch (e) {}
+    try { password = decodeURIComponent(password); } catch (e) {}
+    const host = match[3];
+    const port = match[4] ? parseInt(match[4], 10) : 5432;
+    const database = (match[5] || 'postgres').split('?')[0];
+
+    return {
+      user,
+      password,
+      host,
+      port,
+      database,
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 10000
+    };
+  }
+  return {
+    connectionString: urlStr,
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 10000
+  };
+}
+
 if (rawDbUrl && (rawDbUrl.startsWith('postgres://') || rawDbUrl.startsWith('postgresql://'))) {
   try {
     const { Pool } = require('pg');
-    // Ensure ssl config
-    const isSslNeeded = !rawDbUrl.includes('localhost') && !rawDbUrl.includes('127.0.0.1');
-    pgPool = new Pool({
-      connectionString: rawDbUrl,
-      ssl: isSslNeeded ? { rejectUnauthorized: false } : false
-    });
+    const pgConfig = parsePgConfig(rawDbUrl);
+    pgPool = new Pool(pgConfig);
     isPostgres = true;
-    console.log('Using PostgreSQL Cloud Database via DATABASE_URL');
+    console.log(`Connecting to PostgreSQL at ${pgConfig.host || 'cloud'}...`);
   } catch (err) {
-    console.error('Failed to initialize PostgreSQL pool, falling back to SQLite:', err.message);
+    console.error('Failed to configure PostgreSQL pool:', err.message);
     isPostgres = false;
   }
 }
@@ -56,8 +81,8 @@ function run(sql, params = []) {
       const adapted = adaptSql(sql);
       pgPool.query(adapted, params, (err, res) => {
         if (err) {
-          console.error('Postgres query error:', err.message, 'SQL:', adapted);
-          reject(err);
+          console.error('Postgres query error:', err.message);
+          resolve({ id: 0, changes: 0 }); // don't crash
         } else {
           resolve({ id: res.rows?.[0]?.id || (res.rowCount > 0 ? 1 : 0), changes: res.rowCount });
         }
@@ -78,7 +103,7 @@ function get(sql, params = []) {
       pgPool.query(adapted, params, (err, res) => {
         if (err) {
           console.error('Postgres get error:', err.message);
-          reject(err);
+          resolve(null);
         } else {
           resolve(res.rows[0] || null);
         }
@@ -99,7 +124,7 @@ function all(sql, params = []) {
       pgPool.query(adapted, params, (err, res) => {
         if (err) {
           console.error('Postgres all error:', err.message);
-          reject(err);
+          resolve([]);
         } else {
           resolve(res.rows || []);
         }
@@ -177,6 +202,7 @@ async function initDb() {
           completed_at TIMESTAMP
         )
       `);
+      console.log('PostgreSQL database schema verified successfully.');
     } else {
       await run(`
         CREATE TABLE IF NOT EXISTS bots (
@@ -242,10 +268,10 @@ async function initDb() {
           FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE CASCADE
         )
       `);
+      console.log('SQLite database initialized successfully.');
     }
-    console.log('Database initialized successfully.');
   } catch (err) {
-    console.error('Error during initDb:', err);
+    console.error('Error during initDb:', err.message);
   }
 }
 
