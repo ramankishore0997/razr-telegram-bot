@@ -69,15 +69,55 @@ function handleWsEvent(event) {
 }
 
 // ==========================================
+// MOBILE SIDEBAR & DRAWER
+// ==========================================
+function toggleMobileSidebar(show) {
+  const sidebar = document.getElementById('appSidebar');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if (!sidebar || !backdrop) return;
+  if (show) {
+    sidebar.classList.remove('-translate-x-full');
+    backdrop.classList.remove('hidden');
+  } else {
+    sidebar.classList.add('-translate-x-full');
+    backdrop.classList.add('hidden');
+  }
+}
+
+function backToConversationsList() {
+  activeSubscriberId = null;
+  const sidebar = document.getElementById('inboxSidebar');
+  const thread = document.getElementById('inboxThread');
+  if (sidebar && thread) {
+    sidebar.classList.remove('hidden');
+    thread.classList.add('hidden');
+  }
+  renderConversationsList();
+}
+
+// ==========================================
 // TABS SWITCHING
 // ==========================================
 function switchTab(tabId) {
   currentTab = tabId;
+  toggleMobileSidebar(false);
+
   document.querySelectorAll('.tab-view').forEach(el => el.classList.add('hidden'));
   document.querySelectorAll('.nav-btn').forEach(el => {
     el.classList.remove('active', 'text-white');
     el.classList.add('text-slate-400');
   });
+
+  // Sync mobile bottom navigation buttons
+  document.querySelectorAll('.bottom-nav-btn').forEach(el => {
+    el.classList.remove('text-sky-400');
+    el.classList.add('text-slate-400');
+  });
+  const activeBottomBtn = document.getElementById(`bottom-tab-${tabId}`);
+  if (activeBottomBtn) {
+    activeBottomBtn.classList.remove('text-slate-400');
+    activeBottomBtn.classList.add('text-sky-400');
+  }
 
   const activeView = document.getElementById(`view-${tabId}`);
   const activeBtn = document.getElementById(`tab-${tabId}`);
@@ -96,8 +136,26 @@ function switchTab(tabId) {
   };
   document.getElementById('headerTitle').innerText = titles[tabId] || 'Dashboard';
 
-  // Trigger tab data load
-  if (tabId === 'inbox') loadConversations();
+  // Responsive Inbox handling: if no user active on mobile, show list
+  if (tabId === 'inbox') {
+    const sidebar = document.getElementById('inboxSidebar');
+    const thread = document.getElementById('inboxThread');
+    if (sidebar && thread) {
+      if (window.innerWidth < 768) {
+        if (!activeSubscriberId) {
+          sidebar.classList.remove('hidden');
+          thread.classList.add('hidden');
+        } else {
+          sidebar.classList.add('hidden');
+          thread.classList.remove('hidden');
+        }
+      } else {
+        sidebar.classList.remove('hidden');
+        thread.classList.remove('hidden');
+      }
+    }
+    loadConversations();
+  }
   if (tabId === 'broadcast') loadBroadcastTab();
   if (tabId === 'welcome') loadWelcomeTab();
   if (tabId === 'subscribers') loadSubscribers();
@@ -359,6 +417,14 @@ document.getElementById('chatSearchInput')?.addEventListener('input', renderConv
 async function selectConversation(subscriberId) {
   activeSubscriberId = subscriberId;
   renderConversationsList();
+
+  // On mobile screens, hide conversation list and show chat thread
+  const sidebar = document.getElementById('inboxSidebar');
+  const thread = document.getElementById('inboxThread');
+  if (sidebar && thread && window.innerWidth < 768) {
+    sidebar.classList.add('hidden');
+    thread.classList.remove('hidden');
+  }
 
   const feed = document.getElementById('messagesFeed');
   feed.innerHTML = '<div class="h-full flex items-center justify-center text-slate-500 text-xs">Loading messages...</div>';

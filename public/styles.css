@@ -44,3 +44,14 @@
 .animate-in {
   animation: fadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* Mobile Safe Area & Touch Optimizations */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  nav.md\:hidden {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
