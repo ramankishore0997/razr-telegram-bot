@@ -12,7 +12,6 @@ let pgPool = null;
 let db = null;
 
 function parsePgConfig(urlStr) {
-  // Regex to extract credentials even with special characters in password
   const match = urlStr.match(/^postgres(?:ql)?:\/\/([^:]+):(.*)@([^:/]+)(?::(\d+))?\/(.+)$/);
   if (match) {
     let user = match[1];
@@ -46,7 +45,7 @@ if (rawDbUrl && (rawDbUrl.startsWith('postgres://') || rawDbUrl.startsWith('post
     const pgConfig = parsePgConfig(rawDbUrl);
     pgPool = new Pool(pgConfig);
     isPostgres = true;
-    console.log(`Connecting to PostgreSQL at ${pgConfig.host || 'cloud'}...`);
+    console.log(`Configured PostgreSQL connection to ${pgConfig.host || 'cloud'}`);
   } catch (err) {
     console.error('Failed to configure PostgreSQL pool:', err.message);
     isPostgres = false;
@@ -64,14 +63,20 @@ if (!isPostgres) {
   });
 }
 
-// Convert SQLite ? placeholders to Postgres $1, $2 if needed
+// Convert SQLite ? placeholders to Postgres $1, $2 and append RETURNING id for INSERTs
 function adaptSql(sql) {
   if (!isPostgres) return sql;
   let paramIndex = 1;
-  return sql.replace(/\?/g, () => `$${paramIndex++}`)
-            .replace(/DATETIME DEFAULT CURRENT_TIMESTAMP/gi, 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
-            .replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO')
-            .replace(/AUTOINCREMENT/gi, 'SERIAL');
+  let adapted = sql.replace(/\?/g, () => `$${paramIndex++}`)
+                   .replace(/DATETIME DEFAULT CURRENT_TIMESTAMP/gi, 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+                   .replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO')
+                   .replace(/AUTOINCREMENT/gi, 'SERIAL');
+
+  const trimmed = adapted.trim();
+  if (trimmed.toUpperCase().startsWith('INSERT INTO') && !trimmed.toUpperCase().includes('RETURNING')) {
+    adapted = trimmed + ' RETURNING id';
+  }
+  return adapted;
 }
 
 // Helper for promise-based queries
@@ -81,10 +86,11 @@ function run(sql, params = []) {
       const adapted = adaptSql(sql);
       pgPool.query(adapted, params, (err, res) => {
         if (err) {
-          console.error('Postgres query error:', err.message);
-          resolve({ id: 0, changes: 0 }); // don't crash
+          console.error('Postgres query error:', err.message, 'SQL:', adapted);
+          reject(err);
         } else {
-          resolve({ id: res.rows?.[0]?.id || (res.rowCount > 0 ? 1 : 0), changes: res.rowCount });
+          const insertedId = res.rows && res.rows.length > 0 ? res.rows[0].id : (res.rowCount > 0 ? 1 : 0);
+          resolve({ id: insertedId, changes: res.rowCount });
         }
       });
     } else {
@@ -99,11 +105,12 @@ function run(sql, params = []) {
 function get(sql, params = []) {
   return new Promise((resolve, reject) => {
     if (isPostgres && pgPool) {
-      const adapted = adaptSql(sql);
+      let paramIndex = 1;
+      const adapted = sql.replace(/\?/g, () => `$${paramIndex++}`);
       pgPool.query(adapted, params, (err, res) => {
         if (err) {
-          console.error('Postgres get error:', err.message);
-          resolve(null);
+          console.error('Postgres get error:', err.message, 'SQL:', adapted);
+          reject(err);
         } else {
           resolve(res.rows[0] || null);
         }
@@ -120,11 +127,12 @@ function get(sql, params = []) {
 function all(sql, params = []) {
   return new Promise((resolve, reject) => {
     if (isPostgres && pgPool) {
-      const adapted = adaptSql(sql);
+      let paramIndex = 1;
+      const adapted = sql.replace(/\?/g, () => `$${paramIndex++}`);
       pgPool.query(adapted, params, (err, res) => {
         if (err) {
-          console.error('Postgres all error:', err.message);
-          resolve([]);
+          console.error('Postgres all error:', err.message, 'SQL:', adapted);
+          reject(err);
         } else {
           resolve(res.rows || []);
         }

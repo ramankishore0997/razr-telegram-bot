@@ -73,20 +73,28 @@ app.post('/api/bots', async (req, res) => {
     const botName = name && name.trim() ? name.trim() : test.info.first_name;
     const botUsername = test.info.username || '';
 
-    const insert = await db.run(
-      `INSERT INTO bots (name, username, token, is_active) VALUES (?, ?, ?, 1)`,
-      [botName, botUsername, token.trim()]
-    );
+    // Check if bot already exists in database
+    let existing = await db.get('SELECT * FROM bots WHERE token = ?', [token.trim()]);
+    if (existing) {
+      await db.run('UPDATE bots SET name = ?, username = ?, is_active = 1 WHERE id = ?', [botName, botUsername, existing.id]);
+    } else {
+      await db.run(
+        `INSERT INTO bots (name, username, token, is_active) VALUES (?, ?, ?, 1)`,
+        [botName, botUsername, token.trim()]
+      );
+    }
 
-    const newBot = await db.get('SELECT * FROM bots WHERE id = ?', [insert.id]);
+    const newBot = await db.get('SELECT * FROM bots WHERE token = ?', [token.trim()]);
+    if (!newBot) {
+      throw new Error('Could not retrieve bot record after insertion');
+    }
+
     await botManager.startBot(newBot.id, newBot.token);
 
     botManager.broadcastWs('bot_added', newBot);
     res.json({ success: true, data: newBot });
   } catch (err) {
-    if (err.message.includes('UNIQUE constraint')) {
-      return res.status(400).json({ success: false, error: 'This bot token is already added.' });
-    }
+    console.error('Error adding bot:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
