@@ -328,7 +328,7 @@ function renderBotsGrid() {
         </span>
       </div>
 
-      <div class="grid grid-cols-2 gap-3 pt-2">
+      <div class="grid grid-cols-2 gap-3 pt-1">
         <div class="bg-dark-900/80 rounded-xl p-3 border border-slate-800">
           <span class="text-[10px] uppercase tracking-wider text-slate-400 block">Subscribers</span>
           <span class="text-base font-bold text-white">${b.subscriber_count || 0}</span>
@@ -336,6 +336,27 @@ function renderBotsGrid() {
         <div class="bg-dark-900/80 rounded-xl p-3 border border-slate-800">
           <span class="text-[10px] uppercase tracking-wider text-slate-400 block">Unread Chats</span>
           <span class="text-base font-bold text-sky-400">${b.unread_count || 0}</span>
+        </div>
+      </div>
+
+      <!-- Admin Telegram Notifications Box -->
+      <div class="bg-dark-900/80 rounded-xl p-3.5 border border-slate-700/60 space-y-2">
+        <div class="flex items-center justify-between">
+          <label class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+            <i data-lucide="bell-ring" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span>Instant Telegram Alerts</span>
+          </label>
+          <span class="text-[10px] text-slate-400">Or type <code class="text-sky-400">/setadmin</code> in bot</span>
+        </div>
+        <p class="text-[11px] text-slate-400">Get an instant notification on your Telegram whenever any user sends a message or starts the bot.</p>
+        <div class="flex items-center gap-2 pt-1">
+          <input type="text" id="adminChatId_${b.id}" value="${b.admin_chat_id || ''}" placeholder="Your Telegram Chat ID (e.g. 824408478)" class="flex-1 bg-dark-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500 font-mono">
+          <button onclick="saveBotAdminAlerts(${b.id})" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition shrink-0">
+            Save
+          </button>
+          <button onclick="sendTestAdminAlert(${b.id})" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-medium transition shrink-0">
+            Test Alert
+          </button>
         </div>
       </div>
 
@@ -351,6 +372,43 @@ function renderBotsGrid() {
   `).join('');
 
   lucide.createIcons();
+}
+
+async function saveBotAdminAlerts(botId) {
+  const input = document.getElementById(`adminChatId_${botId}`);
+  if (!input) return;
+  const adminChatId = input.value.trim();
+
+  try {
+    const res = await fetch(`/api/bots/${botId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin_chat_id: adminChatId, admin_notifications: 1 })
+    });
+    const json = await res.json();
+    if (json.success) {
+      alert('✅ Admin Telegram Alerts ID saved successfully!');
+      await loadBots();
+    } else {
+      alert('Error: ' + json.error);
+    }
+  } catch (e) {
+    alert('Failed to save admin alert settings');
+  }
+}
+
+async function sendTestAdminAlert(botId) {
+  try {
+    const res = await fetch(`/api/bots/${botId}/test-alert`, { method: 'POST' });
+    const json = await res.json();
+    if (json.success) {
+      alert('✅ ' + json.message);
+    } else {
+      alert('❌ ' + json.error);
+    }
+  } catch (e) {
+    alert('Network error while sending test alert');
+  }
 }
 
 // ==========================================

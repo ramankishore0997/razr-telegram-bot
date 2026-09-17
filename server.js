@@ -142,10 +142,10 @@ app.post('/api/bots', async (req, res) => {
   }
 });
 
-// Update bot settings (welcome message, flow, buttons, photo)
+// Update bot settings (welcome message, flow, buttons, photo, admin alerts)
 app.put('/api/bots/:id', async (req, res) => {
   try {
-    const { name, welcome_message, welcome_photo, welcome_buttons, welcome_flow, is_active } = req.body;
+    const { name, welcome_message, welcome_photo, welcome_buttons, welcome_flow, admin_chat_id, admin_notifications, is_active } = req.body;
     const botId = req.params.id;
 
     await db.run(
@@ -155,6 +155,8 @@ app.put('/api/bots/:id', async (req, res) => {
         welcome_photo = COALESCE(?, welcome_photo),
         welcome_buttons = COALESCE(?, welcome_buttons),
         welcome_flow = COALESCE(?, welcome_flow),
+        admin_chat_id = COALESCE(?, admin_chat_id),
+        admin_notifications = COALESCE(?, admin_notifications),
         is_active = COALESCE(?, is_active)
       WHERE id = ?`,
       [
@@ -163,6 +165,8 @@ app.put('/api/bots/:id', async (req, res) => {
         welcome_photo,
         typeof welcome_buttons === 'object' ? JSON.stringify(welcome_buttons) : welcome_buttons,
         typeof welcome_flow === 'object' ? JSON.stringify(welcome_flow) : welcome_flow,
+        admin_chat_id,
+        admin_notifications !== undefined ? Number(admin_notifications) : null,
         is_active,
         botId
       ]
@@ -172,6 +176,31 @@ app.put('/api/bots/:id', async (req, res) => {
     res.json({ success: true, data: updated });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Send test notification to admin
+app.post('/api/bots/:id/test-alert', async (req, res) => {
+  try {
+    const botId = req.params.id;
+    const botRecord = await db.get('SELECT * FROM bots WHERE id = ?', [Number(botId)]);
+    if (!botRecord) return res.status(404).json({ success: false, error: 'Bot not found' });
+    if (!botRecord.admin_chat_id || !botRecord.admin_chat_id.trim()) {
+      return res.status(400).json({ success: false, error: 'Please enter and save your Telegram Admin Chat ID first.' });
+    }
+
+    const botInstance = botManager.getBotInstance(botRecord.id);
+    if (!botInstance) return res.status(400).json({ success: false, error: 'Bot is currently not connected' });
+
+    await botInstance.telegram.sendMessage(
+      botRecord.admin_chat_id.trim(),
+      `🔔 <b>Test Notification from TeleManager</b>\n\n✅ <b>Alerts are working!</b>\nYou will receive instant alerts here on Telegram whenever a user sends a message to @${botRecord.username || 'your bot'}.`,
+      { parse_mode: 'HTML' }
+    );
+
+    res.json({ success: true, message: 'Test alert sent to your Telegram account!' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Failed to send alert: ' + err.message });
   }
 });
 

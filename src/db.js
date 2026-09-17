@@ -168,6 +168,12 @@ async function initDb() {
       try {
         await run(`ALTER TABLE bots ADD COLUMN welcome_flow TEXT DEFAULT '[]'`);
       } catch (e) {}
+      try {
+        await run(`ALTER TABLE bots ADD COLUMN admin_chat_id TEXT DEFAULT ''`);
+      } catch (e) {}
+      try {
+        await run(`ALTER TABLE bots ADD COLUMN admin_notifications INTEGER DEFAULT 1`);
+      } catch (e) {}
 
       await run(`
         CREATE TABLE IF NOT EXISTS subscribers (
@@ -240,6 +246,8 @@ async function initDb() {
           welcome_photo TEXT DEFAULT '',
           welcome_buttons TEXT DEFAULT '[]',
           welcome_flow TEXT DEFAULT '[]',
+          admin_chat_id TEXT DEFAULT '',
+          admin_notifications INTEGER DEFAULT 1,
           is_active INTEGER DEFAULT 1,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -247,6 +255,12 @@ async function initDb() {
 
       try {
         await run(`ALTER TABLE bots ADD COLUMN welcome_flow TEXT DEFAULT '[]'`);
+      } catch (e) {}
+      try {
+        await run(`ALTER TABLE bots ADD COLUMN admin_chat_id TEXT DEFAULT ''`);
+      } catch (e) {}
+      try {
+        await run(`ALTER TABLE bots ADD COLUMN admin_notifications INTEGER DEFAULT 1`);
       } catch (e) {}
 
       await run(`

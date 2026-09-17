@@ -3,6 +3,14 @@ const path = require('path');
 const { Telegraf, Markup } = require('telegraf');
 const db = require('./db');
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function getMediaSource(mediaUrl) {
   if (!mediaUrl) return null;
   const clean = String(mediaUrl).trim();
@@ -218,9 +226,23 @@ class BotManager {
           });
         }
 
-        // Retrieve latest bot welcome config
+        // Retrieve latest bot welcome config & admin settings
         const currentBot = await db.get('SELECT * FROM bots WHERE id = ?', [Number(botId)]);
         if (!currentBot) return;
+
+        // Send Admin Telegram Alert on new subscriber / start
+        if (currentBot.admin_chat_id && currentBot.admin_notifications !== 0) {
+          const adminId = String(currentBot.admin_chat_id).trim();
+          if (adminId && adminId !== String(from?.id)) {
+            const botInfo = this.activeBots.get(Number(botId))?.info;
+            const alertText = `🎉 <b>New Subscriber / Start Alert!</b>\n\n🤖 <b>Bot:</b> @${botInfo?.username || 'bot'}\n👤 <b>User:</b> ${from?.first_name || ''} ${from?.last_name || ''} (@${from?.username || 'none'})\n🆔 <b>Chat ID:</b> <code>${from?.id}</code>\n⏱️ <b>Time:</b> ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+            try {
+              await bot.telegram.sendMessage(adminId, alertText, { parse_mode: 'HTML' });
+            } catch (alertErr) {
+              console.warn('Failed to send admin subscriber alert:', alertErr.message);
+            }
+          }
+        }
 
         let flow = [];
         try {
@@ -315,12 +337,31 @@ class BotManager {
     bot.command('start', handleStartTrigger);
     bot.hears(/^\/start/i, handleStartTrigger);
 
+    // Command to check Chat ID
+    bot.command('myid', async (ctx) => {
+      await ctx.reply(`🆔 <b>Your Telegram Chat ID:</b> <code>${ctx.from.id}</code>`, { parse_mode: 'HTML' });
+    });
+
+    // Command to automatically set this user as the notification admin
+    bot.command('setadmin', async (ctx) => {
+      try {
+        const adminId = String(ctx.from.id);
+        await db.run('UPDATE bots SET admin_chat_id = ?, admin_notifications = 1 WHERE id = ?', [adminId, Number(botId)]);
+        await ctx.reply(
+          `✅ <b>Admin Alerts Configured!</b>\n\nYour Telegram ID (<code>${adminId}</code>) is now set as the notification admin for this bot.\n\nYou will receive instant alerts here whenever any user sends a message!`,
+          { parse_mode: 'HTML' }
+        );
+      } catch (e) {
+        await ctx.reply(`❌ Failed to set admin: ${e.message}`);
+      }
+    });
+
     // Handle regular incoming text and media messages from users
     bot.on('message', async (ctx) => {
       try {
         const rawText = ctx.message.text || ctx.message.caption || '';
-        // If it was already handled by /start, ignore here
-        if (rawText.toLowerCase().startsWith('/start')) return;
+        // If it was already handled by /start or /setadmin or /myid, ignore here
+        if (rawText.toLowerCase().startsWith('/start') || rawText.toLowerCase().startsWith('/setadmin') || rawText.toLowerCase().startsWith('/myid')) return;
 
         const sub = await getOrCreateSubscriber(ctx.from);
         if (!sub) return;
@@ -363,6 +404,27 @@ class BotManager {
         );
         const incomingMsg = await db.get('SELECT * FROM messages WHERE id = ?', [msgRes.id]);
         this.broadcastWs('new_message', { botId: Number(botId), subscriberId: sub.id, message: incomingMsg });
+
+        // Forward Real-time Notification to Admin on Telegram
+        const currentBot = await db.get('SELECT * FROM bots WHERE id = ?', [Number(botId)]);
+        if (currentBot && currentBot.admin_chat_id && currentBot.admin_notifications !== 0) {
+          const adminId = String(currentBot.admin_chat_id).trim();
+          // Don't notify admin of their own messages
+          if (adminId && adminId !== String(ctx.from.id)) {
+            const botInfo = this.activeBots.get(Number(botId))?.info;
+            const senderName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || 'User';
+            const username = ctx.from.username ? `@${ctx.from.username}` : 'No username';
+            const msgPreview = text ? text : `[Sent a ${mediaType}]`;
+
+            const alertText = `🔔 <b>New Message Received!</b>\n\n🤖 <b>Bot:</b> @${botInfo?.username || 'bot'}\n👤 <b>From:</b> ${senderName} (${username})\n🆔 <b>User ID:</b> <code>${ctx.from.id}</code>\n💬 <b>Message:</b>\n<i>${escapeHtml(msgPreview)}</i>\n\n⏱️ <b>Time:</b> ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+            try {
+              await bot.telegram.sendMessage(adminId, alertText, { parse_mode: 'HTML' });
+            } catch (alertErr) {
+              console.warn('Failed to send admin notification:', alertErr.message);
+            }
+          }
+        }
       } catch (err) {
         console.error('Error handling incoming message:', err);
       }
