@@ -159,10 +159,15 @@ async function initDb() {
           welcome_message TEXT DEFAULT 'Hello {first_name}! Welcome to our bot 🎉',
           welcome_photo TEXT DEFAULT '',
           welcome_buttons TEXT DEFAULT '[]',
+          welcome_flow TEXT DEFAULT '[]',
           is_active INTEGER DEFAULT 1,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+
+      try {
+        await run(`ALTER TABLE bots ADD COLUMN welcome_flow TEXT DEFAULT '[]'`);
+      } catch (e) {}
 
       await run(`
         CREATE TABLE IF NOT EXISTS subscribers (
@@ -221,10 +226,15 @@ async function initDb() {
           welcome_message TEXT DEFAULT 'Hello {first_name}! Welcome to our bot 🎉',
           welcome_photo TEXT DEFAULT '',
           welcome_buttons TEXT DEFAULT '[]',
+          welcome_flow TEXT DEFAULT '[]',
           is_active INTEGER DEFAULT 1,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `);
+
+      try {
+        await run(`ALTER TABLE bots ADD COLUMN welcome_flow TEXT DEFAULT '[]'`);
+      } catch (e) {}
 
       await run(`
         CREATE TABLE IF NOT EXISTS subscribers (

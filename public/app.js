@@ -623,100 +623,262 @@ function updateCampaignProgressUI(data) {
 }
 
 // ==========================================
-// WELCOME MESSAGE BUILDER
+// MULTI-MESSAGE WELCOME FLOW BUILDER
 // ==========================================
-let welcomeButtons = [];
+let welcomeSteps = [];
 
 async function loadWelcomeTab() {
   if (!activeBotId) return;
   const currentBot = bots.find(b => b.id === activeBotId);
   if (!currentBot) return;
 
-  document.getElementById('wmPhoto').value = currentBot.welcome_photo || '';
-  document.getElementById('wmText').value = currentBot.welcome_message || 'Hello {first_name}! Welcome to our bot 🎉';
-
   try {
-    welcomeButtons = JSON.parse(currentBot.welcome_buttons || '[]');
+    welcomeSteps = JSON.parse(currentBot.welcome_flow || '[]');
   } catch (e) {
-    welcomeButtons = [];
+    welcomeSteps = [];
   }
-  renderWelcomeButtons();
-  updateWelcomePreview();
+
+  // If no sequence steps exist yet, migrate from legacy welcome message
+  if (!Array.isArray(welcomeSteps) || welcomeSteps.length === 0) {
+    let legacyButtons = [];
+    try { legacyButtons = JSON.parse(currentBot.welcome_buttons || '[]'); } catch (e) {}
+    
+    welcomeSteps = [
+      {
+        id: Date.now(),
+        type: currentBot.welcome_photo ? 'photo' : 'text',
+        media_url: currentBot.welcome_photo || '',
+        text: currentBot.welcome_message || 'Hello {first_name}! Welcome to our bot 🎉',
+        buttons: Array.isArray(legacyButtons) ? legacyButtons : []
+      }
+    ];
+  }
+
+  renderWelcomeSteps();
+  renderPreviewFlow();
 }
 
-function addWelcomeButtonRow() {
-  welcomeButtons.push({ text: 'Visit Website', url: 'https://' });
-  renderWelcomeButtons();
-  updateWelcomePreview();
+function addWelcomeStep() {
+  welcomeSteps.push({
+    id: Date.now(),
+    type: 'text',
+    media_url: '',
+    text: '',
+    buttons: []
+  });
+  renderWelcomeSteps();
+  renderPreviewFlow();
 }
 
-function removeWelcomeButton(idx) {
-  welcomeButtons.splice(idx, 1);
-  renderWelcomeButtons();
-  updateWelcomePreview();
+function removeWelcomeStep(idx) {
+  if (welcomeSteps.length <= 1) {
+    alert('You need at least one welcome message.');
+    return;
+  }
+  welcomeSteps.splice(idx, 1);
+  renderWelcomeSteps();
+  renderPreviewFlow();
 }
 
-function renderWelcomeButtons() {
-  const container = document.getElementById('wmButtonsContainer');
-  container.innerHTML = welcomeButtons.map((btn, idx) => `
-    <div class="flex items-center gap-2">
-      <input type="text" placeholder="Button Text" value="${btn.text}" oninput="welcomeButtons[${idx}].text = this.value; updateWelcomePreview();" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500">
-      <input type="url" placeholder="https://example.com" value="${btn.url}" oninput="welcomeButtons[${idx}].url = this.value; updateWelcomePreview();" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500">
-      <button type="button" onclick="removeWelcomeButton(${idx})" class="text-rose-400 hover:text-rose-300 p-1">
-        <i data-lucide="x" class="w-4 h-4"></i>
-      </button>
-    </div>
-  `).join('');
+function setStepType(idx, type) {
+  welcomeSteps[idx].type = type;
+  renderWelcomeSteps();
+  renderPreviewFlow();
+}
+
+function addStepButton(stepIdx) {
+  if (!welcomeSteps[stepIdx].buttons) welcomeSteps[stepIdx].buttons = [];
+  welcomeSteps[stepIdx].buttons.push({ text: 'Visit Website', url: 'https://' });
+  renderWelcomeSteps();
+  renderPreviewFlow();
+}
+
+function removeStepButton(stepIdx, btnIdx) {
+  welcomeSteps[stepIdx].buttons.splice(btnIdx, 1);
+  renderWelcomeSteps();
+  renderPreviewFlow();
+}
+
+function renderWelcomeSteps() {
+  const container = document.getElementById('welcomeStepsContainer');
+  if (!container) return;
+
+  container.innerHTML = welcomeSteps.map((step, idx) => {
+    const isPhoto = step.type === 'photo';
+    const isDoc = step.type === 'document' || step.type === 'pdf';
+    const isText = step.type === 'text';
+
+    const buttons = step.buttons || [];
+
+    return `
+      <div class="bg-dark-800 border border-slate-700/80 rounded-2xl p-5 shadow-xl space-y-4 relative">
+        <!-- Step Header -->
+        <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-indigo-600/30 text-indigo-400 font-bold text-xs flex items-center justify-center border border-indigo-500/30">
+              ${idx + 1}
+            </span>
+            <h4 class="text-sm font-semibold text-white">Message #${idx + 1}</h4>
+          </div>
+
+          <!-- Type Selector Pills -->
+          <div class="flex items-center gap-1.5 bg-dark-900 p-1 rounded-xl border border-slate-700">
+            <button type="button" onclick="setStepType(${idx}, 'text')" class="px-2.5 py-1 rounded-lg text-xs font-medium transition ${isText ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}">
+              📝 Text
+            </button>
+            <button type="button" onclick="setStepType(${idx}, 'photo')" class="px-2.5 py-1 rounded-lg text-xs font-medium transition ${isPhoto ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'}">
+              🖼️ Image
+            </button>
+            <button type="button" onclick="setStepType(${idx}, 'document')" class="px-2.5 py-1 rounded-lg text-xs font-medium transition ${isDoc ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}">
+              📄 PDF / Document
+            </button>
+          </div>
+
+          <button type="button" onclick="removeWelcomeStep(${idx})" class="text-rose-400 hover:text-rose-300 p-1 text-xs flex items-center gap-1">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- Media URL (If Image or Document) -->
+        ${(isPhoto || isDoc) ? `
+          <div>
+            <label class="block text-[11px] font-medium text-slate-300 mb-1">
+              ${isPhoto ? '🖼️ Image URL (Direct link to .jpg / .png / .webp)' : '📄 PDF / Document URL (Direct link to .pdf / .doc)'}
+            </label>
+            <input type="url" placeholder="${isPhoto ? 'https://example.com/banner.jpg' : 'https://example.com/guide.pdf'}" value="${step.media_url || ''}" oninput="welcomeSteps[${idx}].media_url = this.value; renderPreviewFlow();" class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500 font-mono">
+          </div>
+        ` : ''}
+
+        <!-- Message / Caption Text -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-[11px] font-medium text-slate-300">
+              ${(isPhoto || isDoc) ? 'Caption Text' : 'Message Text'}
+            </label>
+            <span class="text-[10px] text-slate-400">Use <code class="text-sky-400">{first_name}</code></span>
+          </div>
+          <textarea rows="3" placeholder="${(isPhoto || isDoc) ? 'Add a caption for this media...' : 'Type your message here...'}" oninput="welcomeSteps[${idx}].text = this.value; renderPreviewFlow();" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-brand-500 font-mono">${escapeHtml(step.text || '')}</textarea>
+        </div>
+
+        <!-- Inline Buttons for this step -->
+        <div class="space-y-2 pt-1 border-t border-slate-800">
+          <div class="flex items-center justify-between">
+            <label class="block text-[11px] font-medium text-slate-400">Interactive Buttons (Optional)</label>
+            <button type="button" onclick="addStepButton(${idx})" class="text-[11px] text-sky-400 hover:text-sky-300 flex items-center gap-1 font-medium">
+              <i data-lucide="plus" class="w-3 h-3"></i> Add Button
+            </button>
+          </div>
+
+          <div class="space-y-1.5">
+            ${buttons.map((btn, bIdx) => `
+              <div class="flex items-center gap-2">
+                <input type="text" placeholder="Button Text" value="${btn.text || ''}" oninput="welcomeSteps[${idx}].buttons[${bIdx}].text = this.value; renderPreviewFlow();" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-brand-500">
+                <input type="url" placeholder="https://example.com" value="${btn.url || ''}" oninput="welcomeSteps[${idx}].buttons[${bIdx}].url = this.value; renderPreviewFlow();" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-brand-500">
+                <button type="button" onclick="removeStepButton(${idx}, ${bIdx})" class="text-rose-400 hover:text-rose-300 p-1">
+                  <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
   lucide.createIcons();
 }
 
-function updateWelcomePreview() {
-  const text = document.getElementById('wmText').value || 'Hello Friend!';
-  const photoUrl = document.getElementById('wmPhoto').value.trim();
+function renderPreviewFlow() {
+  const container = document.getElementById('previewFlowFeed');
+  if (!container) return;
 
-  // Update text
-  document.getElementById('previewText').innerText = text.replace(/{first_name}/g, 'Rahul').replace(/{username}/g, '@rahul123');
-
-  // Update photo
-  const photoContainer = document.getElementById('previewPhotoContainer');
-  const photoImg = document.getElementById('previewPhotoImg');
-  if (photoUrl) {
-    photoImg.src = photoUrl;
-    photoContainer.classList.remove('hidden');
-  } else {
-    photoContainer.classList.add('hidden');
+  if (welcomeSteps.length === 0) {
+    container.innerHTML = '<div class="p-6 text-center text-slate-400 text-xs">No welcome messages configured.</div>';
+    return;
   }
 
-  // Update buttons
-  const buttonsDiv = document.getElementById('previewButtons');
-  buttonsDiv.innerHTML = welcomeButtons.map(btn => `
-    <div class="w-full bg-[#2b5278] hover:bg-[#346290] text-center text-xs text-sky-200 font-medium py-2 rounded-lg cursor-pointer transition flex items-center justify-center gap-1.5">
-      <span>${btn.text || 'Button'}</span>
-      <i data-lucide="external-link" class="w-3 h-3 text-sky-300"></i>
-    </div>
-  `).join('');
+  container.innerHTML = welcomeSteps.map((step, idx) => {
+    const isPhoto = step.type === 'photo';
+    const isDoc = step.type === 'document' || step.type === 'pdf';
+    const text = (step.text || '').replace(/{first_name}/g, 'Rahul').replace(/{username}/g, '@rahul123');
+    const buttons = step.buttons || [];
+
+    let mediaBadge = '';
+    if (isPhoto && step.media_url) {
+      mediaBadge = `
+        <div class="rounded-lg overflow-hidden max-h-40 border border-slate-700 mb-2">
+          <img src="${step.media_url}" alt="Image preview" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x200?text=Invalid+Image+URL'">
+        </div>
+      `;
+    } else if (isDoc) {
+      mediaBadge = `
+        <div class="bg-[#1e2c3a] border border-slate-600/50 rounded-lg p-2.5 mb-2 flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+            <i data-lucide="file-text" class="w-4 h-4"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <span class="text-xs font-semibold text-white truncate block">${step.media_url ? step.media_url.split('/').pop().split('?')[0] || 'Document.pdf' : 'Document.pdf'}</span>
+            <span class="text-[10px] text-slate-400">PDF / Document</span>
+          </div>
+        </div>
+      `;
+    }
+
+    let buttonsHtml = '';
+    if (buttons.length > 0) {
+      buttonsHtml = `
+        <div class="space-y-1 pt-2 border-t border-slate-700/40 mt-2">
+          ${buttons.map(b => `
+            <div class="w-full bg-[#2b5278] hover:bg-[#346290] text-center text-[11px] text-sky-200 font-medium py-1.5 rounded-lg flex items-center justify-center gap-1">
+              <span>${b.text || 'Button'}</span>
+              <i data-lucide="external-link" class="w-2.5 h-2.5 text-sky-300"></i>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="bg-[#242f3d] rounded-xl p-3 border border-slate-700/40 shadow-sm space-y-1">
+        <div class="flex items-center justify-between text-[9px] text-sky-400 font-mono font-bold uppercase tracking-wider mb-1">
+          <span>Msg #${idx + 1} • ${step.type}</span>
+        </div>
+        ${mediaBadge}
+        ${text ? `<div class="text-xs text-slate-100 whitespace-pre-line leading-relaxed font-sans">${escapeHtml(text)}</div>` : ''}
+        ${buttonsHtml}
+      </div>
+    `;
+  }).join('');
+
   lucide.createIcons();
 }
 
 async function saveWelcomeSettings() {
   if (!activeBotId) return;
-  const welcome_message = document.getElementById('wmText').value;
-  const welcome_photo = document.getElementById('wmPhoto').value.trim();
-  const validButtons = welcomeButtons.filter(b => b.text.trim());
+
+  // Clean steps
+  const validSteps = welcomeSteps.map(s => ({
+    id: s.id || Date.now(),
+    type: s.type || 'text',
+    media_url: (s.media_url || '').trim(),
+    text: (s.text || '').trim(),
+    buttons: (s.buttons || []).filter(b => b && b.text && b.text.trim())
+  }));
 
   try {
     const res = await fetch(`/api/bots/${activeBotId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        welcome_message,
-        welcome_photo,
-        welcome_buttons: validButtons
+        welcome_flow: validSteps,
+        welcome_message: validSteps[0]?.text || '',
+        welcome_photo: validSteps[0]?.type === 'photo' ? validSteps[0]?.media_url : '',
+        welcome_buttons: validSteps[0]?.buttons || []
       })
     });
     const json = await res.json();
     if (json.success) {
-      alert('Welcome flow saved successfully!');
+      alert('Welcome message sequence saved successfully!');
       await loadBots();
     } else {
       alert('Failed: ' + json.error);

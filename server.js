@@ -99,10 +99,10 @@ app.post('/api/bots', async (req, res) => {
   }
 });
 
-// Update bot settings (welcome message, buttons, photo)
+// Update bot settings (welcome message, flow, buttons, photo)
 app.put('/api/bots/:id', async (req, res) => {
   try {
-    const { name, welcome_message, welcome_photo, welcome_buttons, is_active } = req.body;
+    const { name, welcome_message, welcome_photo, welcome_buttons, welcome_flow, is_active } = req.body;
     const botId = req.params.id;
 
     await db.run(
@@ -111,6 +111,7 @@ app.put('/api/bots/:id', async (req, res) => {
         welcome_message = COALESCE(?, welcome_message),
         welcome_photo = COALESCE(?, welcome_photo),
         welcome_buttons = COALESCE(?, welcome_buttons),
+        welcome_flow = COALESCE(?, welcome_flow),
         is_active = COALESCE(?, is_active)
       WHERE id = ?`,
       [
@@ -118,6 +119,7 @@ app.put('/api/bots/:id', async (req, res) => {
         welcome_message,
         welcome_photo,
         typeof welcome_buttons === 'object' ? JSON.stringify(welcome_buttons) : welcome_buttons,
+        typeof welcome_flow === 'object' ? JSON.stringify(welcome_flow) : welcome_flow,
         is_active,
         botId
       ]

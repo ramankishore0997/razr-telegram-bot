@@ -116,47 +116,119 @@ class BotManager {
         const currentBot = await db.get('SELECT * FROM bots WHERE id = ?', [botId]);
         if (!currentBot) return;
 
-        let welcomeText = currentBot.welcome_message || 'Hello {first_name}! Welcome to our bot 🎉';
-        welcomeText = welcomeText
-          .replace(/{first_name}/g, ctx.from.first_name || 'Friend')
-          .replace(/{last_name}/g, ctx.from.last_name || '')
-          .replace(/{username}/g, ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || 'Friend'));
-
-        // Parse inline buttons
-        let keyboard = null;
+        let flow = [];
         try {
-          const buttons = JSON.parse(currentBot.welcome_buttons || '[]');
-          if (Array.isArray(buttons) && buttons.length > 0) {
-            const inlineRows = buttons.map(btn => {
-              if (btn.url) {
-                return [Markup.button.url(btn.text, btn.url)];
-              }
-              return [Markup.button.callback(btn.text, btn.callback_data || btn.text)];
-            });
-            keyboard = Markup.inlineKeyboard(inlineRows);
-          }
+          flow = JSON.parse(currentBot.welcome_flow || '[]');
         } catch (e) {
-          console.error('Error parsing buttons:', e);
+          flow = [];
         }
 
-        // Send photo or text
-        let outText = welcomeText;
-        if (currentBot.welcome_photo && currentBot.welcome_photo.trim().length > 0) {
-          const extra = keyboard ? { caption: welcomeText, parse_mode: 'HTML', ...keyboard } : { caption: welcomeText, parse_mode: 'HTML' };
-          await ctx.replyWithPhoto(currentBot.welcome_photo, extra);
+        // Helper to format placeholders
+        const formatText = (raw) => {
+          if (!raw) return '';
+          return raw
+            .replace(/{first_name}/g, ctx.from.first_name || 'Friend')
+            .replace(/{last_name}/g, ctx.from.last_name || '')
+            .replace(/{username}/g, ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || 'Friend'));
+        };
+
+        // Helper to build keyboard
+        const buildKeyboard = (btnList) => {
+          if (!Array.isArray(btnList) || btnList.length === 0) return null;
+          const valid = btnList.filter(b => b && b.text && b.text.trim());
+          if (valid.length === 0) return null;
+          const rows = valid.map(btn => {
+            if (btn.url && btn.url.trim()) {
+              return [Markup.button.url(btn.text.trim(), btn.url.trim())];
+            }
+            return [Markup.button.callback(btn.text.trim(), btn.callback_data || btn.text.trim())];
+          });
+          return Markup.inlineKeyboard(rows);
+        };
+
+        if (Array.isArray(flow) && flow.length > 0) {
+          // Process multi-step sequence
+          for (let i = 0; i < flow.length; i++) {
+            const step = flow[i];
+            const stepText = formatText(step.text || '');
+            const keyboard = buildKeyboard(step.buttons);
+            const extra = keyboard ? { parse_mode: 'HTML', ...keyboard } : { parse_mode: 'HTML' };
+            const type = (step.type || 'text').toLowerCase();
+            const mediaUrl = (step.media_url || '').trim();
+
+            let sentType = 'text';
+            let sentMedia = '';
+
+            try {
+              if (type === 'photo' && mediaUrl) {
+                sentType = 'photo';
+                sentMedia = mediaUrl;
+                await ctx.replyWithPhoto(mediaUrl, { ...extra, caption: stepText });
+              } else if ((type === 'document' || type === 'pdf') && mediaUrl) {
+                sentType = 'document';
+                sentMedia = mediaUrl;
+                await ctx.replyWithDocument(mediaUrl, { ...extra, caption: stepText });
+              } else {
+                sentType = 'text';
+                if (stepText) {
+                  await ctx.reply(stepText, extra);
+                }
+              }
+
+              // Save outgoing message
+              await db.run(
+                `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type, media_url)
+                 VALUES (?, ?, 'out', ?, ?, ?)`,
+                [botId, sub.id, stepText, sentType, sentMedia]
+              );
+              this.broadcastWs('new_message', {
+                botId,
+                subscriberId: sub.id,
+                message: {
+                  bot_id: botId,
+                  subscriber_id: sub.id,
+                  direction: 'out',
+                  text: stepText,
+                  media_type: sentType,
+                  media_url: sentMedia,
+                  created_at: new Date().toISOString()
+                }
+              });
+
+              // Small delay between sequential messages
+              if (i < flow.length - 1) {
+                await new Promise(r => setTimeout(r, 450));
+              }
+            } catch (stepErr) {
+              console.error(`Error sending welcome step #${i + 1}:`, stepErr.message);
+            }
+          }
         } else {
-          const extra = keyboard ? { parse_mode: 'HTML', ...keyboard } : { parse_mode: 'HTML' };
-          await ctx.reply(welcomeText, extra);
-        }
+          // Legacy single welcome message fallback
+          let welcomeText = formatText(currentBot.welcome_message || 'Hello {first_name}! Welcome to our bot 🎉');
+          let keyboard = null;
+          try {
+            const buttons = JSON.parse(currentBot.welcome_buttons || '[]');
+            keyboard = buildKeyboard(buttons);
+          } catch (e) {}
 
-        // Save outgoing welcome message
-        const outMsgRes = await db.run(
-          `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type, media_url)
-           VALUES (?, ?, 'out', ?, ?, ?)`,
-          [botId, sub.id, outText, currentBot.welcome_photo ? 'photo' : 'text', currentBot.welcome_photo || '']
-        );
-        const outMsg = await db.get('SELECT * FROM messages WHERE id = ?', [outMsgRes.id]);
-        this.broadcastWs('new_message', { botId, subscriberId: sub.id, message: outMsg });
+          const extra = keyboard ? { parse_mode: 'HTML', ...keyboard } : { parse_mode: 'HTML' };
+          let sentType = 'text';
+          let sentMedia = currentBot.welcome_photo || '';
+
+          if (sentMedia && sentMedia.trim().length > 0) {
+            sentType = 'photo';
+            await ctx.replyWithPhoto(sentMedia.trim(), { ...extra, caption: welcomeText });
+          } else {
+            await ctx.reply(welcomeText, extra);
+          }
+
+          await db.run(
+            `INSERT INTO messages (bot_id, subscriber_id, direction, text, media_type, media_url)
+             VALUES (?, ?, 'out', ?, ?, ?)`,
+            [botId, sub.id, welcomeText, sentType, sentMedia]
+          );
+        }
       } catch (err) {
         console.error('Error handling /start:', err);
       }
