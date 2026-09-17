@@ -1,5 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+const { Telegraf, Markup } = require('telegraf');
+const db = require('./db');
 
 function getMediaSource(mediaUrl) {
   if (!mediaUrl) return null;
