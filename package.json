@@ -1,0 +1,29 @@
+{
+  "name": "telegram-bot-manager",
+  "version": "1.0.0",
+  "description": "Multi-Bot Telegram Management Web Platform with Live Chat, Broadcast, and Welcome Flow",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "manager",
+    "broadcast",
+    "livechat",
+    "sendpulse-alternative"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "sqlite3": "^5.1.7",
+    "telegraf": "^4.16.3",
+    "ws": "^8.17.0"
+  }
+}

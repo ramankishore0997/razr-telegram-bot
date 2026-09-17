@@ -1,0 +1,861 @@
+// State
+let bots = [];
+let activeBotId = null;
+let currentTab = 'inbox';
+let conversations = [];
+let activeSubscriberId = null;
+let activeSubscriber = null;
+let subscribersList = [];
+let campaigns = [];
+let ws = null;
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', async () => {
+  lucide.createIcons();
+  setupWebSocket();
+  await loadBots();
+});
+
+// ==========================================
+// WEBSOCKET SYNC
+// ==========================================
+function setupWebSocket() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}/ws`;
+  
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    document.getElementById('wsStatusDot').className = 'w-2 h-2 rounded-full bg-emerald-400';
+    document.getElementById('wsStatusText').innerText = 'Live Sync';
+  };
+
+  ws.onclose = () => {
+    document.getElementById('wsStatusDot').className = 'w-2 h-2 rounded-full bg-amber-400';
+    document.getElementById('wsStatusText').innerText = 'Reconnecting...';
+    setTimeout(setupWebSocket, 3000);
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      handleWsEvent(data);
+    } catch (e) {}
+  };
+}
+
+function handleWsEvent(event) {
+  const { type, data } = event;
+
+  if (type === 'new_message') {
+    // If message is for active bot
+    if (data.botId === activeBotId) {
+      // If currently chatting with this user, append message
+      if (activeSubscriberId === data.subscriberId) {
+        appendMessageToFeed(data.message);
+      }
+      loadConversations();
+    }
+  } else if (type === 'new_subscriber') {
+    if (data.botId === activeBotId) {
+      loadConversations();
+      loadSubscribers();
+    }
+  } else if (type === 'campaign_update') {
+    if (data.botId === activeBotId) {
+      updateCampaignProgressUI(data);
+    }
+  }
+}
+
+// ==========================================
+// TABS SWITCHING
+// ==========================================
+function switchTab(tabId) {
+  currentTab = tabId;
+  document.querySelectorAll('.tab-view').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.nav-btn').forEach(el => {
+    el.classList.remove('active', 'text-white');
+    el.classList.add('text-slate-400');
+  });
+
+  const activeView = document.getElementById(`view-${tabId}`);
+  const activeBtn = document.getElementById(`tab-${tabId}`);
+  if (activeView) activeView.classList.remove('hidden');
+  if (activeBtn) {
+    activeBtn.classList.add('active', 'text-white');
+    activeBtn.classList.remove('text-slate-400');
+  }
+
+  const titles = {
+    inbox: 'Live Chat Inbox',
+    broadcast: 'Mass Broadcast Campaign',
+    welcome: 'Welcome Flow (/start)',
+    subscribers: 'Subscribers Management',
+    bots: 'Manage Connected Bots'
+  };
+  document.getElementById('headerTitle').innerText = titles[tabId] || 'Dashboard';
+
+  // Trigger tab data load
+  if (tabId === 'inbox') loadConversations();
+  if (tabId === 'broadcast') loadBroadcastTab();
+  if (tabId === 'welcome') loadWelcomeTab();
+  if (tabId === 'subscribers') loadSubscribers();
+  if (tabId === 'bots') renderBotsGrid();
+}
+
+// ==========================================
+// BOTS MANAGEMENT
+// ==========================================
+async function loadBots() {
+  try {
+    const res = await fetch('/api/bots');
+    const json = await res.json();
+    if (json.success) {
+      bots = json.data;
+      populateBotSelector();
+
+      if (bots.length > 0) {
+        if (!activeBotId || !bots.find(b => b.id === activeBotId)) {
+          setActiveBot(bots[0].id);
+        } else {
+          setActiveBot(activeBotId);
+        }
+      } else {
+        document.getElementById('currentBotName').innerText = 'No Bot Connected';
+        switchTab('bots');
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load bots:', err);
+  }
+}
+
+function populateBotSelector() {
+  const select = document.getElementById('activeBotSelect');
+  const importSelect = document.getElementById('importBotSelect');
+  select.innerHTML = '';
+  importSelect.innerHTML = '';
+
+  if (bots.length === 0) {
+    select.innerHTML = '<option value="" disabled selected>No bots added</option>';
+    importSelect.innerHTML = '<option value="" disabled selected>No bots added</option>';
+    return;
+  }
+
+  bots.forEach(bot => {
+    const opt = document.createElement('option');
+    opt.value = bot.id;
+    opt.innerText = `${bot.name} (@${bot.username || 'bot'})`;
+    select.appendChild(opt);
+
+    const importOpt = document.createElement('option');
+    importOpt.value = bot.id;
+    importOpt.innerText = `${bot.name} (@${bot.username || 'bot'})`;
+    importSelect.appendChild(importOpt);
+  });
+
+  select.onchange = (e) => setActiveBot(Number(e.target.value));
+}
+
+function setActiveBot(botId) {
+  activeBotId = botId;
+  const currentBot = bots.find(b => b.id === botId);
+  if (currentBot) {
+    document.getElementById('activeBotSelect').value = botId;
+    document.getElementById('currentBotName').innerText = `${currentBot.name} (@${currentBot.username || 'bot'})`;
+    
+    // Refresh current active view
+    switchTab(currentTab);
+  }
+}
+
+// Open / Close Add Bot Modal
+function openAddBotModal() {
+  document.getElementById('modalAddBot').classList.remove('hidden');
+  document.getElementById('addBotError').classList.add('hidden');
+  document.getElementById('inputBotToken').value = '';
+  document.getElementById('inputBotName').value = '';
+}
+
+function closeAddBotModal() {
+  document.getElementById('modalAddBot').classList.add('hidden');
+}
+
+async function submitNewBot() {
+  const token = document.getElementById('inputBotToken').value.trim();
+  const name = document.getElementById('inputBotName').value.trim();
+  const errDiv = document.getElementById('addBotError');
+  const btn = document.getElementById('btnSubmitBot');
+
+  if (!token) {
+    errDiv.innerText = 'Please enter a Telegram Bot Token.';
+    errDiv.classList.remove('hidden');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = 'Validating with Telegram...';
+  errDiv.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/bots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, name })
+    });
+    const json = await res.json();
+    if (json.success) {
+      closeAddBotModal();
+      await loadBots();
+      setActiveBot(json.data.id);
+    } else {
+      errDiv.innerText = json.error || 'Failed to add bot';
+      errDiv.classList.remove('hidden');
+    }
+  } catch (e) {
+    errDiv.innerText = 'Network or server error.';
+    errDiv.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Validate & Connect';
+  }
+}
+
+async function deleteBot(botId) {
+  if (!confirm('Are you sure you want to disconnect and delete this bot? Message history will be removed.')) return;
+  try {
+    await fetch(`/api/bots/${botId}`, { method: 'DELETE' });
+    await loadBots();
+  } catch (e) {
+    alert('Failed to delete bot');
+  }
+}
+
+function renderBotsGrid() {
+  const container = document.getElementById('botsCardsGrid');
+  if (bots.length === 0) {
+    container.innerHTML = `
+      <div class="col-span-2 bg-dark-800 border border-slate-800 rounded-2xl p-10 text-center space-y-4">
+        <div class="w-12 h-12 rounded-full bg-slate-700/50 flex items-center justify-center mx-auto text-slate-400">
+          <i data-lucide="bot" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h4 class="text-base font-bold text-white">No Telegram Bots Connected</h4>
+          <p class="text-xs text-slate-400 max-w-sm mx-auto mt-1">Get a bot token from @BotFather on Telegram and connect it here in 1 click.</p>
+        </div>
+        <button onclick="openAddBotModal()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold py-2.5 px-5 rounded-xl shadow-lg inline-flex items-center gap-2">
+          <i data-lucide="plus" class="w-4 h-4"></i> Connect Bot
+        </button>
+      </div>
+    `;
+    lucide.createIcons();
+    return;
+  }
+
+  container.innerHTML = bots.map(b => `
+    <div class="bg-dark-800 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4 relative">
+      <div class="flex items-start justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-bold text-white">
+            <i data-lucide="bot" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h4 class="font-bold text-white text-sm">${b.name}</h4>
+            <a href="https://t.me/${b.username}" target="_blank" class="text-xs text-sky-400 hover:underline">@${b.username || 'unknown'}</a>
+          </div>
+        </div>
+        <span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${b.is_running ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-700' : 'bg-rose-900/40 text-rose-400 border border-rose-700'}">
+          ${b.is_running ? '🟢 Connected' : '🔴 Stopped'}
+        </span>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 pt-2">
+        <div class="bg-dark-900/80 rounded-xl p-3 border border-slate-800">
+          <span class="text-[10px] uppercase tracking-wider text-slate-400 block">Subscribers</span>
+          <span class="text-base font-bold text-white">${b.subscriber_count || 0}</span>
+        </div>
+        <div class="bg-dark-900/80 rounded-xl p-3 border border-slate-800">
+          <span class="text-[10px] uppercase tracking-wider text-slate-400 block">Unread Chats</span>
+          <span class="text-base font-bold text-sky-400">${b.unread_count || 0}</span>
+        </div>
+      </div>
+
+      <div class="pt-3 border-t border-slate-700/60 flex items-center justify-between">
+        <button onclick="setActiveBot(${b.id}); switchTab('inbox');" class="text-xs text-sky-400 hover:text-sky-300 font-medium flex items-center gap-1.5">
+          <i data-lucide="message-square" class="w-3.5 h-3.5"></i> Open Live Chat
+        </button>
+        <button onclick="deleteBot(${b.id})" class="text-xs text-rose-400 hover:text-rose-300 font-medium flex items-center gap-1">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Remove
+        </button>
+      </div>
+    </div>
+  `).join('');
+
+  lucide.createIcons();
+}
+
+// ==========================================
+// LIVE CHAT INBOX
+// ==========================================
+async function loadConversations() {
+  if (!activeBotId) return;
+  try {
+    const res = await fetch(`/api/bots/${activeBotId}/conversations`);
+    const json = await res.json();
+    if (json.success) {
+      conversations = json.data;
+      renderConversationsList();
+    }
+  } catch (err) {
+    console.error('Failed to load conversations:', err);
+  }
+}
+
+function renderConversationsList() {
+  const container = document.getElementById('conversationsList');
+  const search = (document.getElementById('chatSearchInput').value || '').toLowerCase();
+  
+  const filtered = conversations.filter(c => {
+    const name = `${c.first_name || ''} ${c.last_name || ''}`.toLowerCase();
+    const username = (c.username || '').toLowerCase();
+    const id = (c.telegram_id || '').toLowerCase();
+    return name.includes(search) || username.includes(search) || id.includes(search);
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="p-8 text-center text-slate-500 text-xs">No conversations found.</div>';
+    return;
+  }
+
+  container.innerHTML = filtered.map(c => {
+    const isSelected = activeSubscriberId === c.id;
+    const initial = (c.first_name || 'U').charAt(0).toUpperCase();
+    const time = c.last_message_time ? new Date(c.last_message_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    const hasUnread = c.unread_count > 0;
+
+    return `
+      <div onclick="selectConversation(${c.id})" class="p-3.5 flex items-start gap-3 cursor-pointer transition ${isSelected ? 'bg-indigo-600/20 border-l-4 border-indigo-500' : 'hover:bg-dark-800/60'}">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-bold text-xs text-white shrink-0">
+          ${initial}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-semibold text-white truncate">${c.first_name || 'Anonymous User'}</h4>
+            <span class="text-[10px] text-slate-400 shrink-0">${time}</span>
+          </div>
+          <p class="text-[11px] text-slate-400 truncate mt-0.5">
+            ${c.last_message_direction === 'out' ? '<span class="text-sky-400 font-medium">You: </span>' : ''}${c.last_message || 'No messages yet'}
+          </p>
+        </div>
+        ${hasUnread ? `<span class="w-2 h-2 rounded-full bg-sky-400 shrink-0 mt-1.5"></span>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+document.getElementById('chatSearchInput')?.addEventListener('input', renderConversationsList);
+
+async function selectConversation(subscriberId) {
+  activeSubscriberId = subscriberId;
+  renderConversationsList();
+
+  const feed = document.getElementById('messagesFeed');
+  feed.innerHTML = '<div class="h-full flex items-center justify-center text-slate-500 text-xs">Loading messages...</div>';
+
+  try {
+    const res = await fetch(`/api/messages/${activeBotId}/${subscriberId}`);
+    const json = await res.json();
+    if (json.success) {
+      activeSubscriber = json.subscriber;
+      
+      // Update Chat Header
+      document.getElementById('chatUserName').innerText = `${activeSubscriber.first_name || 'User'} ${activeSubscriber.last_name || ''}`;
+      document.getElementById('chatUserMeta').innerText = `@${activeSubscriber.username || 'none'} • ID: ${activeSubscriber.telegram_id}`;
+      document.getElementById('chatUserAvatar').innerText = (activeSubscriber.first_name || 'U').charAt(0).toUpperCase();
+
+      // Render Messages
+      renderMessagesFeed(json.data);
+    }
+  } catch (e) {
+    feed.innerHTML = '<div class="h-full flex items-center justify-center text-rose-400 text-xs">Failed to load chat history.</div>';
+  }
+}
+
+function renderMessagesFeed(messages) {
+  const feed = document.getElementById('messagesFeed');
+  if (messages.length === 0) {
+    feed.innerHTML = '<div class="h-full flex items-center justify-center text-slate-500 text-xs">No messages yet. Say hi!</div>';
+    return;
+  }
+
+  feed.innerHTML = messages.map(m => {
+    const isOut = m.direction === 'out';
+    const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    let mediaHtml = '';
+    if (m.media_type === 'photo' && m.media_url) {
+      mediaHtml = `<img src="${m.media_url}" class="max-w-xs rounded-lg mb-1.5 max-h-60 object-cover" />`;
+    }
+
+    return `
+      <div class="flex flex-col ${isOut ? 'items-end' : 'items-start'}">
+        <div class="max-w-md px-4 py-2.5 rounded-2xl ${isOut ? 'chat-bubble-out' : 'chat-bubble-in'} shadow-md">
+          ${mediaHtml}
+          <div class="text-xs leading-relaxed whitespace-pre-wrap">${escapeHtml(m.text || '')}</div>
+          <div class="text-[9px] opacity-60 text-right mt-1">${time}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function appendMessageToFeed(m) {
+  const feed = document.getElementById('messagesFeed');
+  const isOut = m.direction === 'out';
+  const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `flex flex-col ${isOut ? 'items-end' : 'items-start'}`;
+  msgDiv.innerHTML = `
+    <div class="max-w-md px-4 py-2.5 rounded-2xl ${isOut ? 'chat-bubble-out' : 'chat-bubble-in'} shadow-md">
+      <div class="text-xs leading-relaxed whitespace-pre-wrap">${escapeHtml(m.text || '')}</div>
+      <div class="text-[9px] opacity-60 text-right mt-1">${time}</div>
+    </div>
+  `;
+  feed.appendChild(msgDiv);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+async function handleSendMessage(e) {
+  e.preventDefault();
+  if (!activeBotId || !activeSubscriberId) {
+    alert('Please select a conversation first.');
+    return;
+  }
+
+  const textInput = document.getElementById('chatInputText');
+  const text = textInput.value.trim();
+  if (!text) return;
+
+  textInput.value = '';
+  const btn = document.getElementById('btnSendReply');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/messages/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        botId: activeBotId,
+        subscriberId: activeSubscriberId,
+        text
+      })
+    });
+    const json = await res.json();
+    if (!json.success) {
+      alert('Failed to send message: ' + (json.error || 'Unknown error'));
+    }
+  } catch (err) {
+    alert('Error sending message');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Enter to send
+document.getElementById('chatInputText')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    handleSendMessage(e);
+  }
+});
+
+// ==========================================
+// MASS BROADCAST CAMPAIGN
+// ==========================================
+async function loadBroadcastTab() {
+  if (!activeBotId) return;
+  loadAudienceCount();
+  loadCampaignsList();
+}
+
+async function loadAudienceCount() {
+  try {
+    const res = await fetch(`/api/bots/${activeBotId}/conversations`);
+    const json = await res.json();
+    if (json.success) {
+      const activeCount = json.data.filter(s => !s.is_blocked).length;
+      document.getElementById('bcAudienceCount').innerText = activeCount;
+    }
+  } catch (e) {}
+}
+
+let broadcastButtons = [];
+
+function addBroadcastButtonRow() {
+  broadcastButtons.push({ text: '', url: '' });
+  renderBroadcastButtons();
+}
+
+function removeBroadcastButton(index) {
+  broadcastButtons.splice(index, 1);
+  renderBroadcastButtons();
+}
+
+function renderBroadcastButtons() {
+  const container = document.getElementById('bcButtonsContainer');
+  container.innerHTML = broadcastButtons.map((btn, idx) => `
+    <div class="flex items-center gap-2">
+      <input type="text" placeholder="Button Text (e.g. Visit Website)" value="${btn.text}" oninput="broadcastButtons[${idx}].text = this.value" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500">
+      <input type="url" placeholder="https://example.com" value="${btn.url}" oninput="broadcastButtons[${idx}].url = this.value" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500">
+      <button type="button" onclick="removeBroadcastButton(${idx})" class="text-rose-400 hover:text-rose-300 p-1">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+  `).join('');
+  lucide.createIcons();
+}
+
+async function triggerBroadcast() {
+  if (!activeBotId) return;
+  const text = document.getElementById('bcText').value.trim();
+  const title = document.getElementById('bcTitle').value.trim();
+  const photo_url = document.getElementById('bcPhotoUrl').value.trim();
+
+  if (!text) {
+    alert('Please enter a message to broadcast.');
+    return;
+  }
+
+  if (!confirm('Are you sure you want to send this broadcast to ALL active subscribers?')) return;
+
+  const validButtons = broadcastButtons.filter(b => b.text.trim() && b.url.trim());
+  const btn = document.getElementById('btnStartBroadcast');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        botId: activeBotId,
+        title,
+        text,
+        photo_url,
+        buttons: validButtons
+      })
+    });
+    const json = await res.json();
+    if (json.success) {
+      alert('Broadcast campaign started!');
+      document.getElementById('bcText').value = '';
+      document.getElementById('bcTitle').value = '';
+      document.getElementById('bcPhotoUrl').value = '';
+      broadcastButtons = [];
+      renderBroadcastButtons();
+      loadCampaignsList();
+    } else {
+      alert('Failed: ' + json.error);
+    }
+  } catch (e) {
+    alert('Failed to launch broadcast');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadCampaignsList() {
+  try {
+    const res = await fetch(`/api/campaigns/${activeBotId}`);
+    const json = await res.json();
+    if (json.success) {
+      campaigns = json.data;
+      renderCampaignsList();
+    }
+  } catch (e) {}
+}
+
+function renderCampaignsList() {
+  const container = document.getElementById('campaignsList');
+  if (campaigns.length === 0) {
+    container.innerHTML = '<div class="bg-dark-800/50 border border-slate-800 rounded-xl p-6 text-center text-slate-500 text-xs">No broadcast campaigns yet.</div>';
+    return;
+  }
+
+  container.innerHTML = campaigns.map(c => {
+    const pct = c.total_target > 0 ? Math.round((c.total_sent / c.total_target) * 100) : 100;
+    const isRunning = c.status === 'running';
+
+    return `
+      <div id="campaign-card-${c.id}" class="bg-dark-800 border border-slate-800 rounded-xl p-5 shadow-lg space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h5 class="font-bold text-sm text-white">${c.title}</h5>
+            <span class="text-[11px] text-slate-400">${new Date(c.created_at).toLocaleString()}</span>
+          </div>
+          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${c.status === 'completed' ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-700' : (isRunning ? 'bg-sky-900/40 text-sky-400 border border-sky-700 animate-pulse' : 'bg-slate-700 text-slate-300')}">
+            ${c.status}
+          </span>
+        </div>
+
+        <p class="text-xs text-slate-300 line-clamp-2 bg-dark-900/50 p-2.5 rounded-lg border border-slate-800/80 font-mono">${escapeHtml(c.text)}</p>
+
+        <!-- Progress Bar -->
+        <div class="space-y-1.5">
+          <div class="flex justify-between text-[11px] text-slate-400">
+            <span>Delivered: <b class="text-emerald-400">${c.total_sent}</b> / ${c.total_target}</span>
+            <span>Blocked: <b class="text-rose-400">${c.total_blocked}</b></span>
+          </div>
+          <div class="w-full bg-dark-900 rounded-full h-2 overflow-hidden border border-slate-800">
+            <div class="bg-gradient-to-r from-sky-500 to-indigo-500 h-2 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateCampaignProgressUI(data) {
+  loadCampaignsList();
+}
+
+// ==========================================
+// WELCOME MESSAGE BUILDER
+// ==========================================
+let welcomeButtons = [];
+
+async function loadWelcomeTab() {
+  if (!activeBotId) return;
+  const currentBot = bots.find(b => b.id === activeBotId);
+  if (!currentBot) return;
+
+  document.getElementById('wmPhoto').value = currentBot.welcome_photo || '';
+  document.getElementById('wmText').value = currentBot.welcome_message || 'Hello {first_name}! Welcome to our bot 🎉';
+
+  try {
+    welcomeButtons = JSON.parse(currentBot.welcome_buttons || '[]');
+  } catch (e) {
+    welcomeButtons = [];
+  }
+  renderWelcomeButtons();
+  updateWelcomePreview();
+}
+
+function addWelcomeButtonRow() {
+  welcomeButtons.push({ text: 'Visit Website', url: 'https://' });
+  renderWelcomeButtons();
+  updateWelcomePreview();
+}
+
+function removeWelcomeButton(idx) {
+  welcomeButtons.splice(idx, 1);
+  renderWelcomeButtons();
+  updateWelcomePreview();
+}
+
+function renderWelcomeButtons() {
+  const container = document.getElementById('wmButtonsContainer');
+  container.innerHTML = welcomeButtons.map((btn, idx) => `
+    <div class="flex items-center gap-2">
+      <input type="text" placeholder="Button Text" value="${btn.text}" oninput="welcomeButtons[${idx}].text = this.value; updateWelcomePreview();" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500">
+      <input type="url" placeholder="https://example.com" value="${btn.url}" oninput="welcomeButtons[${idx}].url = this.value; updateWelcomePreview();" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500">
+      <button type="button" onclick="removeWelcomeButton(${idx})" class="text-rose-400 hover:text-rose-300 p-1">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+  `).join('');
+  lucide.createIcons();
+}
+
+function updateWelcomePreview() {
+  const text = document.getElementById('wmText').value || 'Hello Friend!';
+  const photoUrl = document.getElementById('wmPhoto').value.trim();
+
+  // Update text
+  document.getElementById('previewText').innerText = text.replace(/{first_name}/g, 'Rahul').replace(/{username}/g, '@rahul123');
+
+  // Update photo
+  const photoContainer = document.getElementById('previewPhotoContainer');
+  const photoImg = document.getElementById('previewPhotoImg');
+  if (photoUrl) {
+    photoImg.src = photoUrl;
+    photoContainer.classList.remove('hidden');
+  } else {
+    photoContainer.classList.add('hidden');
+  }
+
+  // Update buttons
+  const buttonsDiv = document.getElementById('previewButtons');
+  buttonsDiv.innerHTML = welcomeButtons.map(btn => `
+    <div class="w-full bg-[#2b5278] hover:bg-[#346290] text-center text-xs text-sky-200 font-medium py-2 rounded-lg cursor-pointer transition flex items-center justify-center gap-1.5">
+      <span>${btn.text || 'Button'}</span>
+      <i data-lucide="external-link" class="w-3 h-3 text-sky-300"></i>
+    </div>
+  `).join('');
+  lucide.createIcons();
+}
+
+async function saveWelcomeSettings() {
+  if (!activeBotId) return;
+  const welcome_message = document.getElementById('wmText').value;
+  const welcome_photo = document.getElementById('wmPhoto').value.trim();
+  const validButtons = welcomeButtons.filter(b => b.text.trim());
+
+  try {
+    const res = await fetch(`/api/bots/${activeBotId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        welcome_message,
+        welcome_photo,
+        welcome_buttons: validButtons
+      })
+    });
+    const json = await res.json();
+    if (json.success) {
+      alert('Welcome flow saved successfully!');
+      await loadBots();
+    } else {
+      alert('Failed: ' + json.error);
+    }
+  } catch (e) {
+    alert('Failed to save settings');
+  }
+}
+
+// ==========================================
+// SUBSCRIBERS TABLE
+// ==========================================
+async function loadSubscribers() {
+  if (!activeBotId) return;
+  try {
+    const res = await fetch(`/api/bots/${activeBotId}/conversations`);
+    const json = await res.json();
+    if (json.success) {
+      subscribersList = json.data;
+      renderSubscribersTable(subscribersList);
+    }
+  } catch (e) {}
+}
+
+function renderSubscribersTable(list) {
+  const tbody = document.getElementById('subscribersTableBody');
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-slate-500 text-xs">No subscribers found for this bot.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map(s => `
+    <tr class="hover:bg-dark-900/40 transition">
+      <td class="p-3.5 font-medium text-white flex items-center gap-2.5">
+        <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-[10px] font-bold text-white">
+          ${(s.first_name || 'U').charAt(0).toUpperCase()}
+        </div>
+        <span>${s.first_name || ''} ${s.last_name || ''}</span>
+      </td>
+      <td class="p-3.5 font-mono text-slate-400">${s.telegram_id}</td>
+      <td class="p-3.5 text-sky-400">${s.username ? `@${s.username}` : '-'}</td>
+      <td class="p-3.5">
+        <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${s.is_blocked ? 'bg-rose-900/40 text-rose-400 border border-rose-800' : 'bg-emerald-900/40 text-emerald-400 border border-emerald-800'}">
+          ${s.is_blocked ? 'Blocked' : 'Active'}
+        </span>
+      </td>
+      <td class="p-3.5 text-slate-400">${s.last_interaction ? new Date(s.last_interaction).toLocaleDateString() : '-'}</td>
+      <td class="p-3.5 text-right">
+        <button onclick="selectConversation(${s.id}); switchTab('inbox');" class="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 px-2.5 py-1 rounded-lg text-[11px] font-medium transition">
+          Chat
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function filterSubscribersTable() {
+  const q = document.getElementById('subSearchInput').value.toLowerCase();
+  const filtered = subscribersList.filter(s => {
+    const full = `${s.first_name} ${s.last_name} ${s.username} ${s.telegram_id}`.toLowerCase();
+    return full.includes(q);
+  });
+  renderSubscribersTable(filtered);
+}
+
+// ==========================================
+// IMPORT SUBSCRIBERS MODAL (SendPulse)
+// ==========================================
+function openImportModal() {
+  document.getElementById('modalImport').classList.remove('hidden');
+  document.getElementById('importResultMsg').classList.add('hidden');
+  document.getElementById('importRawData').value = '';
+}
+
+function closeImportModal() {
+  document.getElementById('modalImport').classList.add('hidden');
+}
+
+async function submitImport() {
+  const botId = document.getElementById('importBotSelect').value;
+  const raw = document.getElementById('importRawData').value.trim();
+  const msgDiv = document.getElementById('importResultMsg');
+  const btn = document.getElementById('btnSubmitImport');
+
+  if (!botId || !raw) {
+    alert('Please select a bot and paste subscriber data.');
+    return;
+  }
+
+  // Parse lines: handles CSV formats (id, first_name, username) or raw IDs
+  const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const subscribers = [];
+
+  for (const line of lines) {
+    if (line.toLowerCase().startsWith('telegram_id') || line.toLowerCase().startsWith('id')) continue; // skip header
+    const parts = line.split(/[,\t]/).map(p => p.trim());
+    const telegram_id = parts[0];
+    const first_name = parts[1] || '';
+    const username = parts[2] || '';
+    if (telegram_id) {
+      subscribers.push({ telegram_id, first_name, username });
+    }
+  }
+
+  if (subscribers.length === 0) {
+    alert('No valid subscribers found in input.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = 'Importing...';
+
+  try {
+    const res = await fetch('/api/subscribers/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ botId, subscribers })
+    });
+    const json = await res.json();
+    if (json.success) {
+      msgDiv.className = 'p-3 bg-emerald-900/30 border border-emerald-700 text-emerald-300 rounded-lg text-xs';
+      msgDiv.innerText = `Successfully imported ${json.importedCount} subscribers!`;
+      msgDiv.classList.remove('hidden');
+      loadSubscribers();
+      loadConversations();
+    } else {
+      msgDiv.className = 'p-3 bg-rose-900/30 border border-rose-700 text-rose-300 rounded-lg text-xs';
+      msgDiv.innerText = json.error || 'Import failed';
+      msgDiv.classList.remove('hidden');
+    }
+  } catch (e) {
+    alert('Failed to process import');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Start Import';
+  }
+}
+
+// Helper
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}

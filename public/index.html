@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TelePulse - Multi-Bot Telegram Manager</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              900: '#312e81',
+              telegram: '#229ED9'
+            },
+            dark: {
+              900: '#0f172a',
+              800: '#1e293b',
+              700: '#334155',
+              600: '#475569'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-dark-900 text-slate-100 antialiased font-sans flex h-screen overflow-hidden select-none">
+
+  <!-- SIDEBAR -->
+  <aside class="w-64 bg-dark-800 border-r border-slate-800 flex flex-col justify-between shrink-0">
+    <div>
+      <!-- Brand Logo -->
+      <div class="h-16 flex items-center px-6 gap-3 border-b border-slate-800">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-telegram to-indigo-500 flex items-center justify-center shadow-lg shadow-sky-500/20">
+          <i data-lucide="send" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-base tracking-wide text-white leading-none">TeleManager</h1>
+          <span class="text-xs text-sky-400 font-medium">Multi-Bot Hub</span>
+        </div>
+      </div>
+
+      <!-- Active Bot Selector -->
+      <div class="p-4 border-b border-slate-800">
+        <label class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5 block">Active Bot</label>
+        <div class="relative">
+          <select id="activeBotSelect" class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500 appearance-none cursor-pointer pr-8 font-medium">
+            <option value="" disabled selected>Loading bots...</option>
+          </select>
+          <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400 absolute right-2.5 top-3 pointer-events-none"></i>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="p-3 space-y-1">
+        <button onclick="switchTab('inbox')" id="tab-inbox" class="nav-btn active flex items-center justify-between w-full px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all">
+          <div class="flex items-center gap-3">
+            <i data-lucide="message-square" class="w-4 h-4"></i>
+            <span>Live Chat Inbox</span>
+          </div>
+          <span id="inboxUnreadBadge" class="hidden bg-sky-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">0</span>
+        </button>
+
+        <button onclick="switchTab('broadcast')" id="tab-broadcast" class="nav-btn flex items-center gap-3 w-full px-3.5 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-all">
+          <i data-lucide="megaphone" class="w-4 h-4"></i>
+          <span>Mass Broadcast</span>
+        </button>
+
+        <button onclick="switchTab('welcome')" id="tab-welcome" class="nav-btn flex items-center gap-3 w-full px-3.5 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-all">
+          <i data-lucide="sparkles" class="w-4 h-4"></i>
+          <span>Welcome Message</span>
+        </button>
+
+        <button onclick="switchTab('subscribers')" id="tab-subscribers" class="nav-btn flex items-center gap-3 w-full px-3.5 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-all">
+          <i data-lucide="users" class="w-4 h-4"></i>
+          <span>Subscribers</span>
+        </button>
+
+        <button onclick="switchTab('bots')" id="tab-bots" class="nav-btn flex items-center gap-3 w-full px-3.5 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-all">
+          <i data-lucide="bot" class="w-4 h-4"></i>
+          <span>Manage Bots</span>
+        </button>
+      </nav>
+    </div>
+
+    <!-- Live Sync Status & Add Bot -->
+    <div class="p-4 border-t border-slate-800 space-y-3">
+      <button onclick="openAddBotModal()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 px-3 rounded-lg text-sm flex items-center justify-center gap-2 shadow-sm transition">
+        <i data-lucide="plus-circle" class="w-4 h-4"></i>
+        <span>Connect New Bot</span>
+      </button>
+
+      <div class="flex items-center justify-between text-xs text-slate-400 px-1">
+        <div class="flex items-center gap-1.5">
+          <span id="wsStatusDot" class="w-2 h-2 rounded-full bg-amber-400"></span>
+          <span id="wsStatusText">Connecting...</span>
+        </div>
+        <span class="text-slate-500">v1.0</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT AREA -->
+  <main class="flex-1 flex flex-col min-w-0 bg-dark-900 overflow-hidden">
+
+    <!-- TOP HEADER -->
+    <header class="h-16 bg-dark-800/50 backdrop-blur border-b border-slate-800 flex items-center justify-between px-6 shrink-0">
+      <div class="flex items-center gap-3">
+        <h2 id="headerTitle" class="text-lg font-semibold text-white">Live Chat Inbox</h2>
+        <span id="currentBotBadge" class="bg-dark-900 border border-slate-700 text-slate-300 text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5 font-medium">
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span id="currentBotName">No Bot Selected</span>
+        </span>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button onclick="openImportModal()" class="bg-dark-900 border border-slate-700 hover:border-slate-600 text-slate-300 text-xs font-medium py-1.5 px-3 rounded-lg flex items-center gap-2 transition">
+          <i data-lucide="upload" class="w-3.5 h-3.5 text-sky-400"></i>
+          <span>Import Subscribers (SendPulse)</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- CONTENT CONTAINERS (TABS) -->
+    <div class="flex-1 relative overflow-hidden">
+
+      <!-- ============================================== -->
+      <!-- TAB 1: LIVE CHAT INBOX -->
+      <!-- ============================================== -->
+      <section id="view-inbox" class="tab-view h-full flex">
+        <!-- Conversations List (Left) -->
+        <div class="w-80 border-r border-slate-800 flex flex-col bg-dark-800/30">
+          <div class="p-3 border-b border-slate-800">
+            <div class="relative">
+              <input type="text" id="chatSearchInput" placeholder="Search user..." class="w-full bg-dark-900 border border-slate-700 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+              <i data-lucide="search" class="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5"></i>
+            </div>
+          </div>
+          <div id="conversationsList" class="flex-1 overflow-y-auto divide-y divide-slate-800/40">
+            <!-- Rendered by JS -->
+            <div class="p-8 text-center text-slate-500 text-xs">Loading conversations...</div>
+          </div>
+        </div>
+
+        <!-- Chat Thread (Right) -->
+        <div class="flex-1 flex flex-col bg-dark-900 justify-between">
+          <!-- Active Chat Header -->
+          <div id="chatHeader" class="h-14 border-b border-slate-800 px-6 flex items-center justify-between bg-dark-800/20">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white uppercase" id="chatUserAvatar">
+                ?
+              </div>
+              <div>
+                <h3 id="chatUserName" class="text-sm font-semibold text-white">Select a conversation</h3>
+                <span id="chatUserMeta" class="text-[11px] text-slate-400">Telegram ID: -</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Message History -->
+          <div id="messagesFeed" class="flex-1 overflow-y-auto p-6 space-y-4">
+            <div class="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
+              <i data-lucide="messages-square" class="w-10 h-10 stroke-1 text-slate-600"></i>
+              <p class="text-sm">Click any user on the left to start live chatting</p>
+            </div>
+          </div>
+
+          <!-- Chat Input Box -->
+          <div class="p-4 border-t border-slate-800 bg-dark-800/30">
+            <form id="chatForm" onsubmit="handleSendMessage(event)" class="flex items-end gap-2">
+              <div class="flex-1 bg-dark-900 border border-slate-700 rounded-xl p-2 focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500 transition">
+                <textarea id="chatInputText" rows="2" placeholder="Type your reply... (Enter to send, Shift+Enter for new line)" class="w-full bg-transparent border-0 focus:outline-none text-sm text-slate-200 resize-none px-1"></textarea>
+              </div>
+              <button type="submit" id="btnSendReply" class="h-11 px-5 bg-brand-telegram hover:bg-sky-500 text-white rounded-xl font-medium flex items-center justify-center gap-2 shadow-lg shadow-sky-500/20 transition disabled:opacity-50">
+                <i data-lucide="send" class="w-4 h-4"></i>
+                <span class="text-xs">Send</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ============================================== -->
+      <!-- TAB 2: BROADCAST CAMPAIGN -->
+      <!-- ============================================== -->
+      <section id="view-broadcast" class="tab-view h-full overflow-y-auto p-8 hidden">
+        <div class="max-w-4xl mx-auto space-y-8">
+          <div>
+            <h3 class="text-xl font-bold text-white">Mass Broadcast Campaign</h3>
+            <p class="text-sm text-slate-400">Send personalized messages, images and buttons to all bot subscribers safely with automatic throttling.</p>
+          </div>
+
+          <!-- Create Campaign Card -->
+          <div class="bg-dark-800 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+            <h4 class="text-sm font-semibold text-sky-400 uppercase tracking-wider">New Broadcast</h4>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1">Campaign Title (Internal)</label>
+                <input type="text" id="bcTitle" placeholder="e.g. Weekend Discount Promo" class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1">Header Image URL (Optional)</label>
+                <input type="url" id="bcPhotoUrl" placeholder="https://example.com/poster.jpg" class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+              </div>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-medium text-slate-300">Message Text (Supports HTML & Placeholders)</label>
+                <span class="text-[11px] text-slate-400">Tags: <code class="text-sky-400">{first_name}</code>, <code class="text-sky-400">{username}</code></span>
+              </div>
+              <textarea id="bcText" rows="5" placeholder="Hello {first_name}! 👋&#10;&#10;Here is a special update for you today...&#10;Check our latest deals!" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-brand-500 font-mono"></textarea>
+            </div>
+
+            <!-- Inline Buttons Config -->
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <label class="block text-xs font-medium text-slate-300">Inline Buttons (Optional)</label>
+                <button type="button" onclick="addBroadcastButtonRow()" class="text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1 font-medium">
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add Button
+                </button>
+              </div>
+              <div id="bcButtonsContainer" class="space-y-2">
+                <!-- Dynamically added button rows -->
+              </div>
+            </div>
+
+            <!-- Action & Status -->
+            <div class="pt-4 border-t border-slate-700 flex items-center justify-between">
+              <div class="text-xs text-slate-400">
+                Target Audience: <span id="bcAudienceCount" class="text-white font-bold">0</span> subscribers
+              </div>
+              <button onclick="triggerBroadcast()" id="btnStartBroadcast" class="bg-sky-500 hover:bg-sky-400 text-white px-6 py-2.5 rounded-xl font-medium text-sm flex items-center gap-2 shadow-lg shadow-sky-500/20 transition disabled:opacity-50">
+                <i data-lucide="send" class="w-4 h-4"></i>
+                <span>Send Broadcast Now</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Broadcast History & Live Progress -->
+          <div class="space-y-4">
+            <h4 class="text-base font-bold text-white">Broadcast History & Status</h4>
+            <div id="campaignsList" class="space-y-3">
+              <div class="bg-dark-800/50 border border-slate-800 rounded-xl p-6 text-center text-slate-500 text-xs">No broadcast campaigns yet.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ============================================== -->
+      <!-- TAB 3: WELCOME MESSAGE & BUTTONS BUILDER -->
+      <!-- ============================================== -->
+      <section id="view-welcome" class="tab-view h-full overflow-y-auto p-8 hidden">
+        <div class="max-w-5xl mx-auto space-y-6">
+          <div>
+            <h3 class="text-xl font-bold text-white">Welcome Message Flow (/start)</h3>
+            <p class="text-sm text-slate-400">Customize what users see when they start or interact with this Telegram bot for the first time.</p>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            <!-- Form Config (Left 7 Cols) -->
+            <div class="lg:col-span-7 bg-dark-800 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+              <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1">Header Photo URL (Optional)</label>
+                <input type="url" id="wmPhoto" oninput="updateWelcomePreview()" placeholder="https://example.com/banner.png" class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="block text-xs font-medium text-slate-300">Welcome Text</label>
+                  <span class="text-[11px] text-slate-400">Use <code class="text-sky-400">{first_name}</code></span>
+                </div>
+                <textarea id="wmText" rows="5" oninput="updateWelcomePreview()" placeholder="Hello {first_name}! Welcome to our official bot. How can we help you today?" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-brand-500 font-mono"></textarea>
+              </div>
+
+              <!-- Buttons Config -->
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <label class="block text-xs font-medium text-slate-300">Interactive Buttons</label>
+                  <button type="button" onclick="addWelcomeButtonRow()" class="text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1 font-medium">
+                    <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add Button
+                  </button>
+                </div>
+                <div id="wmButtonsContainer" class="space-y-2">
+                  <!-- Dynamically populated button rows -->
+                </div>
+              </div>
+
+              <div class="pt-4 border-t border-slate-700 flex justify-end">
+                <button onclick="saveWelcomeSettings()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg font-medium text-sm flex items-center gap-2 shadow-lg transition">
+                  <i data-lucide="save" class="w-4 h-4"></i>
+                  <span>Save Welcome Flow</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Live Telegram Message Mockup (Right 5 Cols) -->
+            <div class="lg:col-span-5 bg-dark-800 border border-slate-800 rounded-2xl p-5 space-y-3">
+              <div class="flex items-center gap-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                <i data-lucide="smartphone" class="w-4 h-4"></i>
+                <span>Live Telegram Preview</span>
+              </div>
+
+              <div class="bg-[#17212b] rounded-xl p-4 shadow-inner border border-slate-700/50 space-y-3 max-w-sm mx-auto">
+                <div id="previewPhotoContainer" class="hidden rounded-lg overflow-hidden max-h-48 border border-slate-700">
+                  <img id="previewPhotoImg" src="" alt="Banner Preview" class="w-full h-full object-cover">
+                </div>
+
+                <div id="previewText" class="text-sm text-slate-100 whitespace-pre-line leading-relaxed font-sans">
+                  Hello Friend! Welcome to our bot 🎉
+                </div>
+
+                <div id="previewButtons" class="space-y-1.5 pt-2">
+                  <!-- Rendered dynamic buttons -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ============================================== -->
+      <!-- TAB 4: SUBSCRIBERS LIST -->
+      <!-- ============================================== -->
+      <section id="view-subscribers" class="tab-view h-full overflow-y-auto p-8 hidden">
+        <div class="max-w-6xl mx-auto space-y-6">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-xl font-bold text-white">Subscribers Management</h3>
+              <p class="text-sm text-slate-400">Total users who interacted with or were imported into this bot.</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <input type="text" id="subSearchInput" oninput="filterSubscribersTable()" placeholder="Search by name, username or ID..." class="bg-dark-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-64">
+            </div>
+          </div>
+
+          <!-- Subscribers Table -->
+          <div class="bg-dark-800 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+            <table class="w-full text-left text-xs text-slate-300">
+              <thead class="bg-dark-900/60 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider">
+                <tr>
+                  <th class="p-3.5">User</th>
+                  <th class="p-3.5">Telegram ID</th>
+                  <th class="p-3.5">Username</th>
+                  <th class="p-3.5">Status</th>
+                  <th class="p-3.5">Last Active</th>
+                  <th class="p-3.5 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="subscribersTableBody" class="divide-y divide-slate-800/60">
+                <tr><td colspan="6" class="p-6 text-center text-slate-500">Loading subscribers...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ============================================== -->
+      <!-- TAB 5: MANAGE BOTS -->
+      <!-- ============================================== -->
+      <section id="view-bots" class="tab-view h-full overflow-y-auto p-8 hidden">
+        <div class="max-w-5xl mx-auto space-y-6">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-xl font-bold text-white">Connected Telegram Bots</h3>
+              <p class="text-sm text-slate-400">Add, monitor and configure tokens for all your bots in one place.</p>
+            </div>
+            <button onclick="openAddBotModal()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 px-4 rounded-xl text-sm flex items-center gap-2 shadow-lg transition">
+              <i data-lucide="plus" class="w-4 h-4"></i>
+              <span>Add New Bot</span>
+            </button>
+          </div>
+
+          <div id="botsCardsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ============================================== -->
+  <!-- MODAL: ADD NEW BOT -->
+  <!-- ============================================== -->
+  <div id="modalAddBot" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-dark-800 border border-slate-700 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-5 animate-in">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i data-lucide="bot" class="w-5 h-5 text-sky-400"></i>
+          <span>Connect Telegram Bot</span>
+        </h3>
+        <button onclick="closeAddBotModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Bot Name (Optional)</label>
+          <input type="text" id="inputBotName" placeholder="e.g. My Support Bot" class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Telegram Bot Token (from @BotFather) *</label>
+          <input type="text" id="inputBotToken" placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz..." class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-brand-500">
+          <p class="text-[11px] text-slate-400 mt-1">Get this by messaging <span class="text-sky-400">@BotFather</span> on Telegram.</p>
+        </div>
+
+        <div id="addBotError" class="hidden p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-xs"></div>
+      </div>
+
+      <div class="flex justify-end gap-3 pt-2">
+        <button onclick="closeAddBotModal()" class="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white">Cancel</button>
+        <button onclick="submitNewBot()" id="btnSubmitBot" class="bg-sky-500 hover:bg-sky-400 text-white font-medium py-2 px-5 rounded-lg text-xs flex items-center gap-2 shadow transition">
+          <span>Validate & Connect</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ============================================== -->
+  <!-- MODAL: IMPORT SUBSCRIBERS (SendPulse Migration) -->
+  <!-- ============================================== -->
+  <div id="modalImport" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-dark-800 border border-slate-700 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-5 animate-in">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i data-lucide="upload-cloud" class="w-5 h-5 text-indigo-400"></i>
+          <span>Import Subscribers</span>
+        </h3>
+        <button onclick="closeImportModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4">
+        <p class="text-xs text-slate-300 leading-relaxed">
+          Paste your SendPulse CSV content or a list of Telegram Chat IDs below. Format: <code class="text-sky-400">telegram_id,first_name,username</code> or simply one ID per line.
+        </p>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Target Bot</label>
+          <select id="importBotSelect" class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+            <!-- Options populated by JS -->
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Paste CSV or IDs list</label>
+          <textarea id="importRawData" rows="6" placeholder="824408478,Raman,ramankishore&#10;987654321,John,johndoe&#10;112233445" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-3 text-xs text-white font-mono focus:outline-none focus:border-brand-500"></textarea>
+        </div>
+
+        <div id="importResultMsg" class="hidden p-3 rounded-lg text-xs"></div>
+      </div>
+
+      <div class="flex justify-end gap-3 pt-2">
+        <button onclick="closeImportModal()" class="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white">Cancel</button>
+        <button onclick="submitImport()" id="btnSubmitImport" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 px-5 rounded-lg text-xs flex items-center gap-2 shadow transition">
+          <span>Start Import</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
