@@ -699,6 +699,80 @@ function removeStepButton(stepIdx, btnIdx) {
   renderPreviewFlow();
 }
 
+async function handleStepFileUpload(idx, input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const step = welcomeSteps[idx];
+  const originalText = step.text;
+  
+  const statusEl = document.getElementById(`upload-status-${idx}`);
+  if (statusEl) {
+    statusEl.innerHTML = '<span class="text-amber-400 animate-pulse">⏳ Uploading file...</span>';
+    statusEl.classList.remove('hidden');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+    });
+    const json = await res.json();
+    if (json.success) {
+      step.media_url = json.fileUrl;
+      step.fileName = json.fileName;
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="text-emerald-400">✅ Uploaded: <b>${json.fileName}</b> (${Math.round(json.size / 1024)} KB)</span>`;
+      }
+      renderWelcomeSteps();
+      renderPreviewFlow();
+    } else {
+      alert('Upload failed: ' + json.error);
+      if (statusEl) statusEl.classList.add('hidden');
+    }
+  } catch (err) {
+    alert('Failed to upload file');
+    if (statusEl) statusEl.classList.add('hidden');
+  }
+}
+
+async function handleBroadcastFileUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const statusEl = document.getElementById('bcUploadStatus');
+  if (statusEl) {
+    statusEl.innerHTML = '<span class="text-amber-400 animate-pulse">⏳ Uploading file...</span>';
+    statusEl.classList.remove('hidden');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+    });
+    const json = await res.json();
+    if (json.success) {
+      document.getElementById('bcPhotoUrl').value = json.fileUrl;
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="text-emerald-400">✅ File Ready: <b>${json.fileName}</b> (${Math.round(json.size / 1024)} KB)</span>`;
+      }
+    } else {
+      alert('Upload failed: ' + json.error);
+      if (statusEl) statusEl.classList.add('hidden');
+    }
+  } catch (err) {
+    alert('Failed to upload file');
+    if (statusEl) statusEl.classList.add('hidden');
+  }
+}
+
 function renderWelcomeSteps() {
   const container = document.getElementById('welcomeStepsContainer');
   if (!container) return;
@@ -707,8 +781,9 @@ function renderWelcomeSteps() {
     const isPhoto = step.type === 'photo';
     const isDoc = step.type === 'document' || step.type === 'pdf';
     const isText = step.type === 'text';
-
     const buttons = step.buttons || [];
+    const hasFile = step.media_url && step.media_url.trim().length > 0;
+    const displayName = step.fileName || (step.media_url ? step.media_url.split('/').pop().split('?')[0] : '');
 
     return `
       <div class="bg-dark-800 border border-slate-700/80 rounded-2xl p-5 shadow-xl space-y-4 relative">
@@ -739,13 +814,27 @@ function renderWelcomeSteps() {
           </button>
         </div>
 
-        <!-- Media URL (If Image or Document) -->
+        <!-- Direct File Upload Box (If Image or Document) -->
         ${(isPhoto || isDoc) ? `
-          <div>
-            <label class="block text-[11px] font-medium text-slate-300 mb-1">
-              ${isPhoto ? '🖼️ Image URL (Direct link to .jpg / .png / .webp)' : '📄 PDF / Document URL (Direct link to .pdf / .doc)'}
-            </label>
-            <input type="url" placeholder="${isPhoto ? 'https://example.com/banner.jpg' : 'https://example.com/guide.pdf'}" value="${step.media_url || ''}" oninput="welcomeSteps[${idx}].media_url = this.value; renderPreviewFlow();" class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500 font-mono">
+          <div class="bg-dark-900/90 border border-slate-700/80 rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-semibold ${isPhoto ? 'text-sky-400' : 'text-amber-400'}">
+                ${isPhoto ? '🖼️ Upload Image File' : '📄 Upload PDF / Document File'}
+              </label>
+              <span class="text-[10px] text-slate-400">Directly from your PC / Phone</span>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <label class="cursor-pointer bg-dark-800 hover:bg-slate-700 border border-slate-600 px-4 py-2 rounded-xl text-xs font-medium text-white flex items-center gap-2 shadow transition">
+                <i data-lucide="upload" class="w-3.5 h-3.5 text-sky-400"></i>
+                <span>${hasFile ? '📁 Change File' : '📁 Choose File to Upload'}</span>
+                <input type="file" accept="${isPhoto ? 'image/*' : '.pdf,.doc,.docx,.txt,.zip'}" onchange="handleStepFileUpload(${idx}, this)" class="hidden">
+              </label>
+
+              <div id="upload-status-${idx}" class="text-xs truncate flex-1 ${hasFile ? '' : 'hidden'}">
+                ${hasFile ? `<span class="text-emerald-400 font-medium truncate block">✅ Ready: <b>${displayName}</b></span>` : ''}
+              </div>
+            </div>
           </div>
         ` : ''}
 
@@ -753,11 +842,11 @@ function renderWelcomeSteps() {
         <div>
           <div class="flex items-center justify-between mb-1">
             <label class="block text-[11px] font-medium text-slate-300">
-              ${(isPhoto || isDoc) ? 'Caption Text' : 'Message Text'}
+              ${(isPhoto || isDoc) ? 'Caption Text (Optional)' : 'Message Text'}
             </label>
             <span class="text-[10px] text-slate-400">Use <code class="text-sky-400">{first_name}</code></span>
           </div>
-          <textarea rows="3" placeholder="${(isPhoto || isDoc) ? 'Add a caption for this media...' : 'Type your message here...'}" oninput="welcomeSteps[${idx}].text = this.value; renderPreviewFlow();" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-brand-500 font-mono">${escapeHtml(step.text || '')}</textarea>
+          <textarea rows="3" placeholder="${(isPhoto || isDoc) ? 'Add a caption for this file...' : 'Type your message here...'}" oninput="welcomeSteps[${idx}].text = this.value; renderPreviewFlow();" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-brand-500 font-mono">${escapeHtml(step.text || '')}</textarea>
         </div>
 
         <!-- Inline Buttons for this step -->

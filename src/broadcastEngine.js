@@ -1,8 +1,22 @@
+const fs = require('fs');
+const path = require('path');
 const db = require('./db');
 const botManager = require('./botManager');
 const { Markup } = require('telegraf');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function getMediaSource(mediaUrl) {
+  if (!mediaUrl) return null;
+  const clean = mediaUrl.trim();
+  if (clean.startsWith('/uploads/') || clean.startsWith('uploads/')) {
+    const localPath = path.join(__dirname, '../public', clean.replace(/^\//, ''));
+    if (fs.existsSync(localPath)) {
+      return { source: localPath };
+    }
+  }
+  return clean;
+}
 
 class BroadcastEngine {
   constructor() {
@@ -65,8 +79,14 @@ class BroadcastEngine {
         .replace(/{username}/g, sub.username ? `@${sub.username}` : (sub.first_name || 'Friend'));
 
       try {
-        if (campaign.photo_url && campaign.photo_url.trim().length > 0) {
-          await bot.telegram.sendPhoto(chatId, campaign.photo_url, { ...extra, caption: text });
+        const mediaSource = getMediaSource(campaign.photo_url);
+        if (mediaSource) {
+          const isDoc = campaign.photo_url.toLowerCase().endsWith('.pdf') || campaign.photo_url.toLowerCase().endsWith('.doc') || campaign.photo_url.toLowerCase().endsWith('.docx');
+          if (isDoc) {
+            await bot.telegram.sendDocument(chatId, mediaSource, { ...extra, caption: text });
+          } else {
+            await bot.telegram.sendPhoto(chatId, mediaSource, { ...extra, caption: text });
+          }
         } else {
           await bot.telegram.sendMessage(chatId, text, extra);
         }

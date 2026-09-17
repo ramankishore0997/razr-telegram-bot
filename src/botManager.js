@@ -1,5 +1,17 @@
-const { Telegraf, Markup } = require('telegraf');
-const db = require('./db');
+const fs = require('fs');
+const path = require('path');
+
+function getMediaSource(mediaUrl) {
+  if (!mediaUrl) return null;
+  const clean = mediaUrl.trim();
+  if (clean.startsWith('/uploads/') || clean.startsWith('uploads/')) {
+    const localPath = path.join(__dirname, '../public', clean.replace(/^\//, ''));
+    if (fs.existsSync(localPath)) {
+      return { source: localPath };
+    }
+  }
+  return clean;
+}
 
 class BotManager {
   constructor() {
@@ -160,14 +172,15 @@ class BotManager {
             let sentMedia = '';
 
             try {
-              if (type === 'photo' && mediaUrl) {
+              const mediaSource = getMediaSource(mediaUrl);
+              if (type === 'photo' && mediaSource) {
                 sentType = 'photo';
                 sentMedia = mediaUrl;
-                await ctx.replyWithPhoto(mediaUrl, { ...extra, caption: stepText });
-              } else if ((type === 'document' || type === 'pdf') && mediaUrl) {
+                await ctx.replyWithPhoto(mediaSource, { ...extra, caption: stepText });
+              } else if ((type === 'document' || type === 'pdf') && mediaSource) {
                 sentType = 'document';
                 sentMedia = mediaUrl;
-                await ctx.replyWithDocument(mediaUrl, { ...extra, caption: stepText });
+                await ctx.replyWithDocument(mediaSource, { ...extra, caption: stepText });
               } else {
                 sentType = 'text';
                 if (stepText) {
@@ -319,8 +332,11 @@ class BotManager {
 
     let sentMsg = null;
     try {
-      if (mediaType === 'photo' && mediaUrl) {
-        sentMsg = await bot.telegram.sendPhoto(chatId, mediaUrl, { caption: text || '', parse_mode: 'HTML' });
+      const mediaSource = getMediaSource(mediaUrl);
+      if (mediaType === 'photo' && mediaSource) {
+        sentMsg = await bot.telegram.sendPhoto(chatId, mediaSource, { caption: text || '', parse_mode: 'HTML' });
+      } else if ((mediaType === 'document' || mediaType === 'pdf') && mediaSource) {
+        sentMsg = await bot.telegram.sendDocument(chatId, mediaSource, { caption: text || '', parse_mode: 'HTML' });
       } else {
         sentMsg = await bot.telegram.sendMessage(chatId, text, { parse_mode: 'HTML' });
       }

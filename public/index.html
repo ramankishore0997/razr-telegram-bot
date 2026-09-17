@@ -212,8 +212,16 @@
                 <input type="text" id="bcTitle" placeholder="e.g. Weekend Discount Promo" class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
               </div>
               <div>
-                <label class="block text-xs font-medium text-slate-300 mb-1">Header Image URL (Optional)</label>
-                <input type="url" id="bcPhotoUrl" placeholder="https://example.com/poster.jpg" class="w-full bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+                <label class="block text-xs font-medium text-slate-300 mb-1">Attach Photo or PDF (Optional)</label>
+                <div class="flex items-center gap-2">
+                  <label class="cursor-pointer bg-dark-900 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded-lg text-xs font-medium text-slate-200 flex items-center gap-1.5 transition shrink-0">
+                    <i data-lucide="upload" class="w-3.5 h-3.5 text-sky-400"></i>
+                    <span>Upload File</span>
+                    <input type="file" accept="image/*,.pdf,.doc,.docx" onchange="handleBroadcastFileUpload(this)" class="hidden">
+                  </label>
+                  <input type="text" id="bcPhotoUrl" placeholder="/uploads/... or URL" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500 font-mono">
+                </div>
+                <div id="bcUploadStatus" class="text-[11px] text-emerald-400 mt-1 hidden"></div>
               </div>
             </div>
 
