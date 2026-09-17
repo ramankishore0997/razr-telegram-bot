@@ -2,7 +2,7 @@
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>TelePulse - Multi-Bot Telegram Manager</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -35,13 +35,13 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body class="bg-dark-900 text-slate-100 antialiased font-sans flex flex-col md:flex-row h-screen overflow-hidden select-none">
+<body class="bg-dark-900 text-slate-100 antialiased font-sans flex flex-col md:flex-row h-full h-[100dvh] overflow-hidden">
 
   <!-- MOBILE SIDEBAR BACKDROP -->
-  <div id="sidebarBackdrop" onclick="toggleMobileSidebar(false)" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-30 hidden md:hidden transition-opacity"></div>
+  <div id="sidebarBackdrop" onclick="toggleMobileSidebar(false)" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 hidden md:hidden transition-opacity"></div>
 
   <!-- SIDEBAR (DESKTOP + MOBILE DRAWER) -->
-  <aside id="appSidebar" class="fixed md:static inset-y-0 left-0 z-40 w-72 md:w-64 bg-dark-800 border-r border-slate-800 flex flex-col justify-between shrink-0 transform -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out shadow-2xl md:shadow-none">
+  <aside id="appSidebar" class="fixed md:static inset-y-0 left-0 z-50 w-72 md:w-64 bg-dark-800 border-r border-slate-800 flex flex-col justify-between shrink-0 transform -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out shadow-2xl md:shadow-none">
     <div>
       <!-- Brand Logo -->
       <div class="h-16 flex items-center justify-between px-5 md:px-6 border-b border-slate-800">

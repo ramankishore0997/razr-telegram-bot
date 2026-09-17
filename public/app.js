@@ -89,11 +89,36 @@ function backToConversationsList() {
   const sidebar = document.getElementById('inboxSidebar');
   const thread = document.getElementById('inboxThread');
   if (sidebar && thread) {
-    sidebar.classList.remove('hidden');
-    thread.classList.add('hidden');
+    if (window.innerWidth < 768) {
+      sidebar.style.display = 'flex';
+      thread.style.display = 'none';
+    } else {
+      sidebar.style.display = 'flex';
+      thread.style.display = 'flex';
+    }
   }
   renderConversationsList();
 }
+
+// Window resize handler to maintain proper responsive layout
+window.addEventListener('resize', () => {
+  const sidebar = document.getElementById('inboxSidebar');
+  const thread = document.getElementById('inboxThread');
+  if (sidebar && thread && currentTab === 'inbox') {
+    if (window.innerWidth >= 768) {
+      sidebar.style.display = 'flex';
+      thread.style.display = 'flex';
+    } else {
+      if (activeSubscriberId) {
+        sidebar.style.display = 'none';
+        thread.style.display = 'flex';
+      } else {
+        sidebar.style.display = 'flex';
+        thread.style.display = 'none';
+      }
+    }
+  }
+});
 
 // ==========================================
 // TABS SWITCHING
@@ -110,13 +135,13 @@ function switchTab(tabId) {
 
   // Sync mobile bottom navigation buttons
   document.querySelectorAll('.bottom-nav-btn').forEach(el => {
-    el.classList.remove('text-sky-400');
+    el.classList.remove('active', 'text-sky-400');
     el.classList.add('text-slate-400');
   });
   const activeBottomBtn = document.getElementById(`bottom-tab-${tabId}`);
   if (activeBottomBtn) {
     activeBottomBtn.classList.remove('text-slate-400');
-    activeBottomBtn.classList.add('text-sky-400');
+    activeBottomBtn.classList.add('active', 'text-sky-400');
   }
 
   const activeView = document.getElementById(`view-${tabId}`);
@@ -143,15 +168,15 @@ function switchTab(tabId) {
     if (sidebar && thread) {
       if (window.innerWidth < 768) {
         if (!activeSubscriberId) {
-          sidebar.classList.remove('hidden');
-          thread.classList.add('hidden');
+          sidebar.style.display = 'flex';
+          thread.style.display = 'none';
         } else {
-          sidebar.classList.add('hidden');
-          thread.classList.remove('hidden');
+          sidebar.style.display = 'none';
+          thread.style.display = 'flex';
         }
       } else {
-        sidebar.classList.remove('hidden');
-        thread.classList.remove('hidden');
+        sidebar.style.display = 'flex';
+        thread.style.display = 'flex';
       }
     }
     loadConversations();
@@ -552,9 +577,14 @@ async function selectConversation(subscriberId) {
   // On mobile screens, hide conversation list and show chat thread
   const sidebar = document.getElementById('inboxSidebar');
   const thread = document.getElementById('inboxThread');
-  if (sidebar && thread && window.innerWidth < 768) {
-    sidebar.classList.add('hidden');
-    thread.classList.remove('hidden');
+  if (sidebar && thread) {
+    if (window.innerWidth < 768) {
+      sidebar.style.display = 'none';
+      thread.style.display = 'flex';
+    } else {
+      sidebar.style.display = 'flex';
+      thread.style.display = 'flex';
+    }
   }
 
   const feed = document.getElementById('messagesFeed');
