@@ -16,6 +16,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Explicit root route
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // WebSocket connection handling
 wss.on('connection', (ws) => {
   botManager.addWsClient(ws);
