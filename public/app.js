@@ -370,6 +370,75 @@ async function loadConversations() {
   }
 }
 
+// Helper to compute user online / last active status
+function getOnlineStatusInfo(lastInteraction, isBlocked) {
+  if (isBlocked) {
+    return {
+      statusText: '🚫 Blocked Bot',
+      badgeClass: 'bg-rose-900/40 text-rose-400 border-rose-800',
+      dotClass: 'bg-rose-500',
+      isOnline: false
+    };
+  }
+  if (!lastInteraction) {
+    return {
+      statusText: '⚪ Offline (Never Active)',
+      badgeClass: 'bg-slate-800 text-slate-400 border-slate-700',
+      dotClass: 'bg-slate-500',
+      isOnline: false
+    };
+  }
+
+  const now = new Date();
+  const last = new Date(lastInteraction);
+  const diffMs = now - last;
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 5) {
+    return {
+      statusText: '🟢 Online / Active now',
+      relativeText: 'Online now',
+      badgeClass: 'bg-emerald-900/40 text-emerald-400 border-emerald-700',
+      dotClass: 'bg-emerald-400',
+      isOnline: true
+    };
+  } else if (diffMins < 60) {
+    return {
+      statusText: `🟡 Active ${diffMins}m ago`,
+      relativeText: `${diffMins}m ago`,
+      badgeClass: 'bg-amber-900/30 text-amber-400 border-amber-700/50',
+      dotClass: 'bg-amber-400',
+      isOnline: false
+    };
+  } else if (diffHours < 24) {
+    return {
+      statusText: `🟡 Active ${diffHours}h ago`,
+      relativeText: `${diffHours}h ago`,
+      badgeClass: 'bg-amber-900/20 text-amber-300 border-amber-700/40',
+      dotClass: 'bg-amber-400',
+      isOnline: false
+    };
+  } else if (diffDays === 1) {
+    return {
+      statusText: `⚪ Last seen yesterday, ${last.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      relativeText: 'Yesterday',
+      badgeClass: 'bg-slate-800 text-slate-400 border-slate-700',
+      dotClass: 'bg-slate-500',
+      isOnline: false
+    };
+  } else {
+    return {
+      statusText: `⚪ Last seen ${last.toLocaleDateString([], { day: 'numeric', month: 'short' })}, ${last.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      relativeText: `${diffDays}d ago`,
+      badgeClass: 'bg-slate-800 text-slate-400 border-slate-700',
+      dotClass: 'bg-slate-500',
+      isOnline: false
+    };
+  }
+}
+
 function renderConversationsList() {
   const container = document.getElementById('conversationsList');
   const search = (document.getElementById('chatSearchInput').value || '').toLowerCase();
@@ -391,16 +460,20 @@ function renderConversationsList() {
     const initial = (c.first_name || 'U').charAt(0).toUpperCase();
     const time = c.last_message_time ? new Date(c.last_message_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     const hasUnread = c.unread_count > 0;
+    const status = getOnlineStatusInfo(c.last_interaction, c.is_blocked);
 
     return `
       <div onclick="selectConversation(${c.id})" class="p-3.5 flex items-start gap-3 cursor-pointer transition ${isSelected ? 'bg-indigo-600/20 border-l-4 border-indigo-500' : 'hover:bg-dark-800/60'}">
-        <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-bold text-xs text-white shrink-0">
-          ${initial}
+        <div class="relative shrink-0">
+          <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-bold text-xs text-white">
+            ${initial}
+          </div>
+          <span class="w-2.5 h-2.5 rounded-full ${status.dotClass} absolute -bottom-0.5 -right-0.5 border-2 border-dark-900" title="${status.statusText}"></span>
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between">
             <h4 class="text-xs font-semibold text-white truncate">${c.first_name || 'Anonymous User'}</h4>
-            <span class="text-[10px] text-slate-400 shrink-0">${time}</span>
+            <span class="text-[10px] text-slate-400 shrink-0">${time || status.relativeText || ''}</span>
           </div>
           <p class="text-[11px] text-slate-400 truncate mt-0.5">
             ${c.last_message_direction === 'out' ? '<span class="text-sky-400 font-medium">You: </span>' : ''}${c.last_message || 'No messages yet'}
@@ -434,10 +507,20 @@ async function selectConversation(subscriberId) {
     const json = await res.json();
     if (json.success) {
       activeSubscriber = json.subscriber;
+      const status = getOnlineStatusInfo(activeSubscriber.last_interaction, activeSubscriber.is_blocked);
       
-      // Update Chat Header
+      // Update Chat Header with rich Last Seen / Online badge
       document.getElementById('chatUserName').innerText = `${activeSubscriber.first_name || 'User'} ${activeSubscriber.last_name || ''}`;
-      document.getElementById('chatUserMeta').innerText = `@${activeSubscriber.username || 'none'} • ID: ${activeSubscriber.telegram_id}`;
+      document.getElementById('chatUserMeta').innerHTML = `
+        <span class="inline-flex items-center gap-1.5 ${status.isOnline ? 'text-emerald-400 font-medium' : 'text-slate-400'}">
+          <span class="w-1.5 h-1.5 rounded-full ${status.dotClass}"></span>
+          <span>${status.statusText}</span>
+        </span>
+        <span class="text-slate-600 mx-1">•</span>
+        <span class="text-slate-400">@${activeSubscriber.username || 'none'}</span>
+        <span class="text-slate-600 mx-1">•</span>
+        <span class="text-slate-500 font-mono">ID: ${activeSubscriber.telegram_id}</span>
+      `;
       document.getElementById('chatUserAvatar').innerText = (activeSubscriber.first_name || 'U').charAt(0).toUpperCase();
 
       // Render Messages
@@ -1150,29 +1233,42 @@ function renderSubscribersTable(list) {
     return;
   }
 
-  tbody.innerHTML = list.map(s => `
-    <tr class="hover:bg-dark-900/40 transition">
-      <td class="p-3.5 font-medium text-white flex items-center gap-2.5">
-        <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-[10px] font-bold text-white">
-          ${(s.first_name || 'U').charAt(0).toUpperCase()}
-        </div>
-        <span>${s.first_name || ''} ${s.last_name || ''}</span>
-      </td>
-      <td class="p-3.5 font-mono text-slate-400">${s.telegram_id}</td>
-      <td class="p-3.5 text-sky-400">${s.username ? `@${s.username}` : '-'}</td>
-      <td class="p-3.5">
-        <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${s.is_blocked ? 'bg-rose-900/40 text-rose-400 border border-rose-800' : 'bg-emerald-900/40 text-emerald-400 border border-emerald-800'}">
-          ${s.is_blocked ? 'Blocked' : 'Active'}
-        </span>
-      </td>
-      <td class="p-3.5 text-slate-400">${s.last_interaction ? new Date(s.last_interaction).toLocaleDateString() : '-'}</td>
-      <td class="p-3.5 text-right">
-        <button onclick="selectConversation(${s.id}); switchTab('inbox');" class="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 px-2.5 py-1 rounded-lg text-[11px] font-medium transition">
-          Chat
-        </button>
-      </td>
-    </tr>
-  `).join('');
+  tbody.innerHTML = list.map(s => {
+    const status = getOnlineStatusInfo(s.last_interaction, s.is_blocked);
+    const fullDate = s.last_interaction ? new Date(s.last_interaction).toLocaleString() : 'Never';
+
+    return `
+      <tr class="hover:bg-dark-900/40 transition">
+        <td class="p-3.5 font-medium text-white flex items-center gap-2.5">
+          <div class="relative shrink-0">
+            <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-[10px] font-bold text-white">
+              ${(s.first_name || 'U').charAt(0).toUpperCase()}
+            </div>
+            <span class="w-2 h-2 rounded-full ${status.dotClass} absolute -bottom-0.5 -right-0.5 border-2 border-dark-900" title="${status.statusText}"></span>
+          </div>
+          <span class="truncate">${s.first_name || ''} ${s.last_name || ''}</span>
+        </td>
+        <td class="p-3.5 font-mono text-slate-400">${s.telegram_id}</td>
+        <td class="p-3.5 text-sky-400">${s.username ? `@${s.username}` : '-'}</td>
+        <td class="p-3.5">
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${s.is_blocked ? 'bg-rose-900/40 text-rose-400 border border-rose-800' : 'bg-emerald-900/40 text-emerald-400 border border-emerald-800'}">
+            ${s.is_blocked ? '🚫 Blocked' : '✅ Active'}
+          </span>
+        </td>
+        <td class="p-3.5">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${status.badgeClass}" title="Last Activity: ${fullDate}">
+            <span class="w-1.5 h-1.5 rounded-full ${status.dotClass}"></span>
+            <span>${status.statusText}</span>
+          </span>
+        </td>
+        <td class="p-3.5 text-right">
+          <button onclick="selectConversation(${s.id}); switchTab('inbox');" class="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 px-3 py-1 rounded-lg text-[11px] font-medium transition">
+            Chat
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
 }
 
 function filterSubscribersTable() {
